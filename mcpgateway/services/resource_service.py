@@ -195,6 +195,7 @@ class ResourceNameConflictError(ResourceError):
         self.name = name
         self.enabled = enabled
         self.resource_id = resource_id
+        self.visibility = visibility
         message = f"A resource with this name already exists: {name}"
         if not enabled:
             message += f" (currently inactive, ID: {resource_id})"
@@ -704,7 +705,7 @@ class ResourceService(BaseService):
                 },
             )
             raise ie
-        except ResourceURIConflictError as rce:  # noqa: F841
+        except ResourceURIConflictError:
             logger.error("ResourceURIConflictError in group: %s", resource.uri)
 
             # Structured logging: Log URI conflict error
@@ -721,7 +722,7 @@ class ResourceService(BaseService):
                 },
             )
             raise
-        except ResourceNameConflictError as rnce:
+        except ResourceNameConflictError:
             logger.error(f"ResourceNameConflictError in group: {resource.name}")
 
             # Structured logging: Log name conflict error
@@ -940,7 +941,9 @@ class ResourceService(BaseService):
                             ).scalar_one_or_none()
                         elif resource_visibility.lower() == "team" and resource_team_id:
                             existing_by_name = db.execute(
-                                select(DbResource).where(DbResource.name == resource.name, DbResource.visibility == "team", DbResource.team_id == resource_team_id, DbResource.gateway_id == resource_gateway_id)
+                                select(DbResource).where(
+                                    DbResource.name == resource.name, DbResource.visibility == "team", DbResource.team_id == resource_team_id, DbResource.gateway_id == resource_gateway_id
+                                )
                             ).scalar_one_or_none()
                         else:
                             existing_by_name = None
@@ -951,7 +954,7 @@ class ResourceService(BaseService):
                                 stats["skipped"] += 1
                                 stats["errors"].append(f"Resource '{resource.name}' skipped: name already exists")
                                 continue
-                            elif conflict_strategy == "fail":
+                            if conflict_strategy == "fail":
                                 raise ResourceNameConflictError(resource.name, enabled=existing_by_name.enabled, resource_id=existing_by_name.id, visibility=existing_by_name.visibility)
                             # rename / update strategies fall through to URI-based handling below
 

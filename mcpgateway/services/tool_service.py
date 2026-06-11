@@ -3801,6 +3801,7 @@ class ToolService(BaseService):
         server_id: Optional[str] = None,
         plugin_global_context: Optional[GlobalContext] = None,
         plugin_context_table: Optional[PluginContextTable] = None,
+        require_model_visible: bool = False,
     ) -> Dict[str, Any]:
         """Build a narrow MCP execution plan for the Rust runtime hot path.
 
@@ -3824,6 +3825,7 @@ class ToolService(BaseService):
             server_id: Optional virtual server identifier restricting tool access.
             plugin_global_context: Optional global context from middleware for hook continuity.
             plugin_context_table: Optional context table from prior hooks for state sharing.
+            require_model_visible: When True, deny execution unless the resolved tool is model-visible.
 
         Returns:
             A Rust execution plan dictionary, or a fallback descriptor when direct
@@ -3938,6 +3940,9 @@ class ToolService(BaseService):
             return {"eligible": False, "fallbackReason": "direct-proxy"}
 
         if not await self._check_tool_access(db, tool_payload, user_email, token_teams):
+            raise ToolNotFoundError(f"Tool not found: {name}")
+
+        if require_model_visible and not is_model_visible_tool(tool_payload):
             raise ToolNotFoundError(f"Tool not found: {name}")
 
         if server_id and not tool_selected_from_server_scope:
@@ -4384,6 +4389,7 @@ class ToolService(BaseService):
         meta_data: Optional[Dict[str, Any]],
         skip_pre_invoke: bool,
         require_app_visible: bool,
+        require_model_visible: bool,
         path_label: str,
     ) -> "ToolResult":
         """Sleep for the plugin-requested delay, then recursively re-invoke the tool.
@@ -4407,6 +4413,7 @@ class ToolService(BaseService):
             meta_data: Optional metadata dictionary.
             skip_pre_invoke: Whether to skip pre-invoke hooks.
             require_app_visible: Whether the retried invocation must resolve an app-visible tool.
+            require_model_visible: Whether the retried invocation must resolve a model-visible tool.
             path_label: Label for log messages (success/timeout/exception).
 
         Returns:
@@ -4436,6 +4443,7 @@ class ToolService(BaseService):
                 meta_data=meta_data,
                 skip_pre_invoke=skip_pre_invoke,
                 require_app_visible=require_app_visible,
+                require_model_visible=require_model_visible,
                 retry_attempt=retry_attempt + 1,
             )
 
@@ -4454,6 +4462,7 @@ class ToolService(BaseService):
         meta_data: Optional[Dict[str, Any]] = None,
         skip_pre_invoke: bool = False,
         require_app_visible: bool = False,
+        require_model_visible: bool = False,
         retry_attempt: int = 0,
     ) -> ToolResult:
         """
@@ -4478,6 +4487,7 @@ class ToolService(BaseService):
             meta_data: Optional metadata dictionary for additional context (e.g., request ID).
             skip_pre_invoke: When True, skip TOOL_PRE_INVOKE hooks (used by trusted Rust fallback path).
             require_app_visible: When True, deny execution unless the resolved tool is MCP Apps app-visible.
+            require_model_visible: When True, deny execution unless the resolved tool is model-visible.
             retry_attempt: Zero-based retry counter; 0 = original call.  Incremented by the retry
                 loop and compared against ``settings.max_tool_retries``.
 
@@ -4679,6 +4689,8 @@ class ToolService(BaseService):
         if require_app_visible:
             if is_direct_proxy or not is_app_visible_tool(tool_payload):
                 raise ToolNotFoundError(f"Tool not found: {name}")
+        elif require_model_visible and not is_direct_proxy and not is_model_visible_tool(tool_payload):
+            raise ToolNotFoundError(f"Tool not found: {name}")
 
         # Extract A2A-related data from annotations (will be used after db.close() if A2A tool)
         tool_annotations = tool_payload.get("annotations") or {}
@@ -6058,6 +6070,7 @@ class ToolService(BaseService):
                             meta_data,
                             skip_pre_invoke,
                             require_app_visible,
+                            require_model_visible,
                             "success",
                         )
 
@@ -6088,6 +6101,7 @@ class ToolService(BaseService):
                         meta_data,
                         skip_pre_invoke,
                         require_app_visible,
+                        require_model_visible,
                         "timeout",
                     )
                 raise
@@ -6148,6 +6162,7 @@ class ToolService(BaseService):
                         meta_data,
                         skip_pre_invoke,
                         require_app_visible,
+                        require_model_visible,
                         "exception",
                     )
 

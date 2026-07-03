@@ -6,17 +6,8 @@
     <title>Sign In - ContextForge</title>
     <!-- Tailwind CSS (pre-compiled) -->
     <link rel="stylesheet" href="{{ root_path }}/static/css/tailwind.min.css" />
-    <!-- Font Awesome -->
-    {% if ui_airgapped %}
+    <!-- Font Awesome (local vendor files) -->
     <link rel="stylesheet" href="{{ root_path }}/static/vendor/fontawesome/css/all.min.css" />
-    {% else %}
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css"
-      integrity="{{ sri_hashes.fontawesome }}"
-      crossorigin="anonymous"
-    />
-    {% endif %}
   </head>
   <body class="h-full bg-gray-50 dark:bg-gray-900 overflow-auto">
     <!-- Main Split Layout -->

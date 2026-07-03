@@ -421,7 +421,7 @@ class TenantPluginManagerFactory:
     async def invalidate_all(self) -> None:
         """Reload every cached manager concurrently, logging failures."""
         async with self._lock:
-            context_ids = [ctx_id for ctx_id in self._managers.keys() if ctx_id != DEFAULT_CONTEXT_ID]
+            context_ids = [ctx_id for ctx_id in self._managers if ctx_id != DEFAULT_CONTEXT_ID]
         results = await asyncio.gather(
             *(self.reload_tenant(ctx_id) for ctx_id in context_ids),
             return_exceptions=True,

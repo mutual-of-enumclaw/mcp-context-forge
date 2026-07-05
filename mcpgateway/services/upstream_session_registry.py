@@ -35,7 +35,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, P
 # Third-Party
 import anyio
 import httpx
-from mcp import ClientSession, McpError
+from mcp import ClientSession, MCPError
 from mcp.client.sse import sse_client
 from mcpgateway.utils.streamable_http_compat import streamable_http_client
 from mcp.shared.session import RequestResponder
@@ -712,7 +712,7 @@ class UpstreamSessionRegistry:
                     elif method == "list_resources":
                         await upstream.session.list_resources()
                 return True
-            except McpError as exc:
+            except MCPError as exc:
                 if exc.error.code == _METHOD_NOT_FOUND:
                     continue  # Server doesn't support this probe; try the next one.
                 self._metrics.health_check_failures += 1

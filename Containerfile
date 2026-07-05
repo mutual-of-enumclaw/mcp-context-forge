@@ -232,6 +232,7 @@ RUN set -euo pipefail \
         python${PYTHON_VERSION} \
         python${PYTHON_VERSION}-devel \
         binutils openssl-devel gcc postgresql-devel gcc-c++ curl libpq-devel \
+        git \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
     && microdnf clean all
 

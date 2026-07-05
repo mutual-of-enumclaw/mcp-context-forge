@@ -497,7 +497,7 @@ class TestGatewayServiceOAuthComprehensive:
             mock_tool = MagicMock(spec=ToolCreate)
             mock_tool.name = "oauth_tool"
             mock_tool.description = "OAuth Tool"
-            mock_tool.inputSchema = {}
+            mock_tool.input_schema = {}
 
             # Mock the new _connect_to_sse_server_without_validation method (used for OAuth servers)
             gateway_service._connect_to_sse_server_without_validation = AsyncMock(

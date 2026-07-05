@@ -4369,6 +4369,8 @@ class TestInvokeResourceCoverage:
         cs_session = AsyncMock()
         cs_session.initialize = AsyncMock(return_value=None)
         cs_session.read_resource.return_value = MagicMock(contents=[MagicMock(text="http-ok", blob=None)])
+        # For resource_service's client.session path
+        cs_session.session = cs_session
 
         span = MagicMock()
 
@@ -4392,17 +4394,16 @@ class TestInvokeResourceCoverage:
             ),
             patch("mcpgateway.services.resource_service.decode_auth", return_value=None),
             patch("mcpgateway.services.metrics_buffer_service.get_metrics_buffer_service") as mock_metrics_buffer,
-            patch("mcpgateway.services.resource_service.streamablehttp_client") as mock_http,
-            patch("mcpgateway.services.resource_service.ClientSession") as MockCS,
+            patch("mcpgateway.services.resource_service.mcp_proxy_client") as mock_http,
+
+
+
         ):
             mock_trace.get = MagicMock(return_value=None)
             mock_metrics_buffer.return_value = MagicMock()
 
-            mock_http.return_value.__aenter__ = AsyncMock(return_value=(AsyncMock(), AsyncMock(), MagicMock(return_value="sid")))
+            mock_http.return_value.__aenter__ = AsyncMock(return_value=cs_session)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-
-            MockCS.return_value.__aenter__ = AsyncMock(return_value=cs_session)
-            MockCS.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await resource_service.invoke_resource(db, "res-1", "http://test.com", resource_obj=resource, gateway_obj=gateway)
         assert result == "http-ok"
@@ -6288,7 +6289,7 @@ class TestInvokeResourceCoverageEdges:
     async def test_invoke_resource_sse_connect_to_sse_session_unpacks_two_values(self):
         """
         Regression test: connect_to_sse_session must unpack only 2 values from sse_client.
-        sse_client yields (read_stream, write_stream) only — unlike streamablehttp_client
+        sse_client yields (read_stream, write_stream) only — unlike streamable_http_client
         which yields a 3rd session ID getter. Unpacking 3 values raises ValueError which
         is silently caught, causing all SSE resource reads to return None/Incorrect result.
         """
@@ -6369,7 +6370,7 @@ class TestInvokeResourceCoverageEdges:
             "sse_client yields (read_stream, write_stream) only, not (read_stream, write_stream, get_session_id)."
         )
 
-        # Verify sse_client was actually called (not streamablehttp_client)
+        # Verify sse_client was actually called (not streamable_http_client)
         mock_sse.assert_called_once()
         cs_session.read_resource.assert_awaited_once()
 
@@ -6951,6 +6952,8 @@ class TestInvokeResourceCoverageEdges:
         cs_session = AsyncMock()
         cs_session.initialize = AsyncMock(return_value=None)
         cs_session.read_resource.return_value = MagicMock(contents=[MagicMock(text="http-ok", blob=None)])
+        # For resource_service's client.session path
+        cs_session.session = cs_session
 
         with (
             patch(
@@ -6969,14 +6972,14 @@ class TestInvokeResourceCoverageEdges:
             # Registry not initialized → registry path short-circuits, fallback taken.
             patch("mcpgateway.services.resource_service.get_upstream_session_registry", side_effect=RuntimeError("not initialized")),
             patch("mcpgateway.services.metrics_buffer_service.get_metrics_buffer_service", return_value=MagicMock()),
-            patch("mcpgateway.services.resource_service.streamablehttp_client") as mock_http,
-            patch("mcpgateway.services.resource_service.ClientSession") as MockCS,
+            patch("mcpgateway.services.resource_service.mcp_proxy_client") as mock_http,
+
+
+
         ):
             mock_trace.get = MagicMock(return_value=None)
-            mock_http.return_value.__aenter__ = AsyncMock(return_value=(AsyncMock(), AsyncMock(), MagicMock(return_value="sid")))
+            mock_http.return_value.__aenter__ = AsyncMock(return_value=cs_session)
             mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-            MockCS.return_value.__aenter__ = AsyncMock(return_value=cs_session)
-            MockCS.return_value.__aexit__ = AsyncMock(return_value=False)
 
             out = await svc.invoke_resource(db, "res-1", "http://ignored", resource_obj=resource, gateway_obj=gateway)
         assert out == "http-ok"
@@ -7072,6 +7075,8 @@ class TestInvokeResourceCoverageEdges:
         cs_session = AsyncMock()
         cs_session.initialize = AsyncMock(return_value=None)
         cs_session.read_resource.return_value = MagicMock(contents=[MagicMock(text="http-fallback-ok", blob=None)])
+        # For resource_service's client.session path
+        cs_session.session = cs_session
 
         headers_token = request_headers_var.set({"mcp-session-id": "downstream-http"})
         try:
@@ -7091,15 +7096,17 @@ class TestInvokeResourceCoverageEdges:
                 patch("mcpgateway.services.resource_service.create_span", MagicMock(return_value=MagicMock(__enter__=MagicMock(return_value=MagicMock()), __exit__=MagicMock(return_value=False)))),
                 patch("mcpgateway.services.resource_service.get_upstream_session_registry", side_effect=RegistryNotInitializedError("not init")),
                 patch("mcpgateway.services.metrics_buffer_service.get_metrics_buffer_service", return_value=MagicMock()),
-                patch("mcpgateway.services.resource_service.streamablehttp_client") as mock_http,
-                patch("mcpgateway.services.resource_service.ClientSession") as MockCS,
+                patch("mcpgateway.services.resource_service.mcp_proxy_client") as mock_http,
+
+
+
             ):
                 mock_trace.get = MagicMock(return_value=None)
-                mock_http.return_value.__aenter__ = AsyncMock(return_value=(AsyncMock(), AsyncMock(), MagicMock(return_value="sid")))
+                # mcp_proxy_client yields a client which has .session property
+                session_mock = cs_session
+                cs_session.read_resource.return_value = MagicMock(contents=[MagicMock(text="http-fallback-ok", blob=None)])
+                mock_http.return_value.__aenter__ = AsyncMock(return_value=cs_session)
                 mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
-                MockCS.return_value.__aenter__ = AsyncMock(return_value=cs_session)
-                MockCS.return_value.__aexit__ = AsyncMock(return_value=False)
-
                 out = await svc.invoke_resource(db, "res-1", "http://ignored", resource_obj=resource, gateway_obj=gateway)
         finally:
             request_headers_var.reset(headers_token)
@@ -7217,14 +7224,18 @@ class TestReadResourceDirectProxy:
         return db
 
     def _make_session_mock(self, result):
-        """Create a mock ClientSession async context manager with a read_resource return value."""
+        """Create a mock session with a read_resource return value.
+
+        The mock is designed so that both session.read_resource and session.session.read_resource
+        work (since resource_service uses client.session.read_resource).
+        """
         session_mock = AsyncMock()
         session_mock.read_resource = AsyncMock(return_value=result)
+        # Make session.session also point to the same session_mock so that
+        # resource_service's client.session.read_resource works.
+        session_mock.session = session_mock
 
-        client_session_cm = AsyncMock()
-        client_session_cm.__aenter__.return_value = session_mock
-        client_session_cm.__aexit__.return_value = AsyncMock()
-        return client_session_cm, session_mock
+        return session_mock
 
     def _common_patches(self, resource_service):
         """Return a contextmanager-compatible tuple of patches common to happy-path tests.
@@ -7259,22 +7270,23 @@ class TestReadResourceDirectProxy:
         # Remote session returns text content
         first_content = MagicMock()
         first_content.text = "hello from remote"
-        first_content.mimeType = "text/plain"
+        first_content.mime_type = "text/plain"
         result_mock = MagicMock()
         result_mock.contents = [first_content]
-
-        client_session_cm, session_mock = self._make_session_mock(result_mock)
+        session_mock = self._make_session_mock(result_mock)
 
         @asynccontextmanager
         async def mock_streamable_client(*_args, **_kwargs):
-            yield ("read", "write", None)
+            yield session_mock
 
         with (
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={"Authorization": "Bearer remote-token"}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client),
-            patch("mcpgateway.services.resource_service.ClientSession", return_value=client_session_cm),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client),
+
+
+
             self._common_patches(resource_service),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
@@ -7304,22 +7316,23 @@ class TestReadResourceDirectProxy:
         # Remote session returns blob content (no .text attribute)
         first_content = MagicMock(spec=[])  # empty spec to control hasattr
         first_content.blob = "base64encodeddata"
-        first_content.mimeType = "application/octet-stream"
+        first_content.mime_type = "application/octet-stream"
         result_mock = MagicMock()
         result_mock.contents = [first_content]
 
-        client_session_cm, session_mock = self._make_session_mock(result_mock)
+        session_mock = self._make_session_mock(result_mock)
 
         @asynccontextmanager
         async def mock_streamable_client(*_args, **_kwargs):
-            yield ("read", "write", None)
+            yield session_mock
 
         with (
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client),
-            patch("mcpgateway.services.resource_service.ClientSession", return_value=client_session_cm),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client),
+
+
             self._common_patches(resource_service),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
@@ -7347,22 +7360,23 @@ class TestReadResourceDirectProxy:
 
         # Remote session returns content with neither text nor blob attribute
         first_content = MagicMock(spec=[])  # empty spec means no text or blob
-        first_content.mimeType = "application/unknown"
+        first_content.mime_type = "application/unknown"
         result_mock = MagicMock()
         result_mock.contents = [first_content]
-
-        client_session_cm, session_mock = self._make_session_mock(result_mock)
+        session_mock = self._make_session_mock(result_mock)
 
         @asynccontextmanager
         async def mock_streamable_client(*_args, **_kwargs):
-            yield ("read", "write", None)
+            yield session_mock
 
         with (
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client),
-            patch("mcpgateway.services.resource_service.ClientSession", return_value=client_session_cm),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client),
+
+
+
             self._common_patches(resource_service),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
@@ -7392,18 +7406,20 @@ class TestReadResourceDirectProxy:
         result_mock = MagicMock()
         result_mock.contents = []
 
-        client_session_cm, session_mock = self._make_session_mock(result_mock)
+        session_mock = self._make_session_mock(result_mock)
 
         @asynccontextmanager
         async def mock_streamable_client(*_args, **_kwargs):
-            yield ("read", "write", None)
+            yield session_mock
 
         with (
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client),
-            patch("mcpgateway.services.resource_service.ClientSession", return_value=client_session_cm),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client),
+
+
+
             self._common_patches(resource_service),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
@@ -7420,7 +7436,6 @@ class TestReadResourceDirectProxy:
         assert isinstance(content, _TextBase)
         assert content.text == ""
         assert content.uri == "http://example.com/dp-resource"
-
     @pytest.mark.asyncio
     async def test_read_resource_direct_proxy_access_denied(self, resource_service, mock_direct_proxy_resource):
         """When check_gateway_access returns False, raises ResourceNotFoundError."""
@@ -7444,7 +7459,7 @@ class TestReadResourceDirectProxy:
 
     @pytest.mark.asyncio
     async def test_read_resource_direct_proxy_connection_error(self, resource_service, mock_direct_proxy_resource):
-        """When streamablehttp_client raises, ResourceError is raised."""
+        """When streamable_http_client raises, ResourceError is raised."""
         # Standard
         from contextlib import asynccontextmanager
 
@@ -7459,7 +7474,7 @@ class TestReadResourceDirectProxy:
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client_error),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client_error),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
             mock_settings.mcpgateway_direct_proxy_timeout = 30
@@ -7484,24 +7499,25 @@ class TestReadResourceDirectProxy:
 
         first_content = MagicMock()
         first_content.text = "meta response"
-        first_content.mimeType = "text/plain"
+        first_content.mime_type = "text/plain"
         result_mock = MagicMock()
         result_mock.contents = [first_content]
 
-        client_session_cm, session_mock = self._make_session_mock(result_mock)
+        session_mock = self._make_session_mock(result_mock)
         # send_request is used instead of read_resource when meta_data is provided
         session_mock.send_request = AsyncMock(return_value=result_mock)
 
         @asynccontextmanager
         async def mock_streamable_client(*_args, **_kwargs):
-            yield ("read", "write", None)
+            yield session_mock
 
         with (
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client),
-            patch("mcpgateway.services.resource_service.ClientSession", return_value=client_session_cm),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client),
+
+
             self._common_patches(resource_service),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
@@ -7522,7 +7538,7 @@ class TestReadResourceDirectProxy:
 
     @pytest.mark.asyncio
     async def test_read_resource_direct_proxy_configurable_timeout(self, resource_service, mock_direct_proxy_resource):
-        """Timeout passed to streamablehttp_client matches settings.mcpgateway_direct_proxy_timeout."""
+        """Timeout passed to streamable_http_client matches settings.mcpgateway_direct_proxy_timeout."""
         # Standard
         from contextlib import asynccontextmanager
 
@@ -7531,23 +7547,24 @@ class TestReadResourceDirectProxy:
 
         first_content = MagicMock()
         first_content.text = "ok"
-        first_content.mimeType = "text/plain"
+        first_content.mime_type = "text/plain"
         result_mock = MagicMock()
         result_mock.contents = [first_content]
 
-        client_session_cm, session_mock = self._make_session_mock(result_mock)
+        session_mock = self._make_session_mock(result_mock)
 
         @asynccontextmanager
         async def mock_streamable_client(*_args, **kwargs):
             captured_kwargs.update(kwargs)
-            yield ("read", "write", None)
+            yield session_mock
 
         with (
             patch("mcpgateway.services.resource_service.settings") as mock_settings,
             patch("mcpgateway.services.resource_service.check_gateway_access", new_callable=AsyncMock, return_value=True),
             patch("mcpgateway.services.resource_service.build_gateway_auth_headers", return_value={}),
-            patch("mcpgateway.services.resource_service.streamablehttp_client", mock_streamable_client),
-            patch("mcpgateway.services.resource_service.ClientSession", return_value=client_session_cm),
+            patch("mcpgateway.services.resource_service.mcp_proxy_client", mock_streamable_client),
+
+
             self._common_patches(resource_service),
         ):
             mock_settings.mcpgateway_direct_proxy_enabled = True
@@ -7898,26 +7915,23 @@ class TestBuildReadResourceRequest:
 
         meta_data = {"trace_id": "xyz", "user": "alice@example.com"}
         request = _build_read_resource_request("file:///test.txt", meta_data)
-        # Unwrap to the inner params model
-        inner_params = request.root.params
-        assert inner_params is not None
-        assert inner_params.meta is not None
-        dumped = inner_params.meta.model_dump()
-        # All meta_data keys must survive; MCP SDK may add progressToken alongside
-        assert meta_data.items() <= dumped.items()
+        # Request is ReadResourceRequest directly (no ClientRequest wrapper in MCP v2)
+        assert request.params is not None
+        assert request.params.meta is not None
+        # meta is a plain dict in MCP v2 (was RequestMeta model in v1)
+        meta_dict = request.params.meta if isinstance(request.params.meta, dict) else request.params.meta.model_dump()
+        assert meta_data.items() <= meta_dict.items()
 
     def test_returns_client_request_type(self):
-        """Return value must be a ClientRequest wrapping ReadResourceRequest."""
+        """Return value must be a ReadResourceRequest (no ClientRequest wrapper in MCP v2)."""
         # Third-Party
-        from mcp import types
-        from mcp.types import ReadResourceRequest
+        from mcp_types import ReadResourceRequest
 
         # First-Party
         from mcpgateway.services.resource_service import _build_read_resource_request
 
         req = _build_read_resource_request("file:///test.txt", {"k": "v"})
-        assert isinstance(req, types.ClientRequest)
-        assert isinstance(req.root, ReadResourceRequest)
+        assert isinstance(req, ReadResourceRequest)
 
 
 class TestReadResourceMetaDataValidationIntegration:

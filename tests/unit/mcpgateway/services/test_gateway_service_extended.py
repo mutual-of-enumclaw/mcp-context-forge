@@ -109,37 +109,29 @@ class TestGatewayServiceExtended:
         service = GatewayService()
 
         with (
-            patch("mcpgateway.services.gateway_service.streamablehttp_client") as mock_http_client,
-            patch("mcpgateway.services.gateway_service.ClientSession") as mock_session,
+            patch("mcpgateway.services.gateway_service.mcp_proxy_client") as mock_proxy,
             patch("mcpgateway.services.gateway_service.decode_auth") as mock_decode,
         ):
             # Setup mocks
             mock_decode.return_value = {"Authorization": "Bearer token"}
 
-            # Mock StreamableHTTP client context manager
-            mock_streams = (MagicMock(), MagicMock(), MagicMock())
-            mock_http_context = AsyncMock()
-            mock_http_context.__aenter__.return_value = mock_streams
-            mock_http_context.__aexit__.return_value = None
-            mock_http_client.return_value = mock_http_context
-
-            # Mock ClientSession
-            mock_session_instance = AsyncMock()
-            mock_session_context = AsyncMock()
-            mock_session_context.__aenter__.return_value = mock_session_instance
-            mock_session_context.__aexit__.return_value = None
-            mock_session.return_value = mock_session_context
-
-            # Mock responses
-            mock_init_response = MagicMock()
-            mock_init_response.capabilities.model_dump.return_value = {"protocolVersion": "0.1.0"}
-            mock_session_instance.initialize.return_value = mock_init_response
-
+            # Mock MCP Proxy client - yields client directly (MCP v2 Client auto-initializes)
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            # server_capabilities.model_dump(by_alias=True, exclude_none=True) called in v2
+            mock_client.server_capabilities = MagicMock()
+            mock_client.server_capabilities.model_dump = MagicMock(return_value={"protocolVersion": "0.1.0"})
+            # list_tools/list_resources return result objects with .tools/.resources attributes
             mock_tools_response = MagicMock()
             mock_tool = MagicMock()
             mock_tool.model_dump.return_value = {"name": "test_tool", "description": "Test tool", "inputSchema": {}}
             mock_tools_response.tools = [mock_tool]
-            mock_session_instance.list_tools.return_value = mock_tools_response
+            mock_client.list_tools = AsyncMock(return_value=mock_tools_response)
+            mock_resources_response = MagicMock()
+            mock_resources_response.resources = []
+            mock_client.list_resources = AsyncMock(return_value=mock_resources_response)
+            mock_proxy.return_value = mock_client
 
             # Execute
             capabilities, tools, resources, prompts, _ = await service._initialize_gateway("http://test.example.com", {"Authorization": "Bearer token"}, "streamablehttp")

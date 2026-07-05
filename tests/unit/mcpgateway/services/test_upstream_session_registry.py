@@ -543,10 +543,10 @@ class _ProbeChainSession:
             return
         if b == "method_not_found":
             # Third-Party
-            from mcp import McpError
-            from mcp.types import ErrorData
+            from mcp import MCPError
+            from mcp_types import ErrorData
 
-            raise McpError(ErrorData(code=-32601, message="method not found"))
+            raise MCPError.from_error_data(ErrorData(code=-32601, message="method not found"))
         if b == "timeout":
             raise TimeoutError("probe timed out")
         if b == "oserror":
@@ -1043,7 +1043,7 @@ def test_upstream_session_bookkeeping_fields_remain_mutable():
 
 
 class _FakeTransportCtx:
-    """Async-CM stand-in for sse_client()/streamablehttp_client()."""
+    """Async-CM stand-in for sse_client()/streamable_http_client()."""
 
     def __init__(self, streams=(None, None), enter_exc: BaseException | None = None):
         self._streams = streams
@@ -1101,7 +1101,7 @@ def _make_request(**overrides):
 
 @pytest.mark.asyncio
 async def test_default_session_factory_streamablehttp_path(monkeypatch):
-    """STREAMABLEHTTP transport routes through streamablehttp_client and returns an initialized session."""
+    """STREAMABLEHTTP transport routes through streamable_http_client and returns an initialized session."""
     # First-Party
     from mcpgateway.services import upstream_session_registry as usr
 
@@ -1110,12 +1110,12 @@ async def test_default_session_factory_streamablehttp_path(monkeypatch):
     def fake_stream(**kwargs):
         captured.update(kwargs)
         captured["which"] = "streamable"
-        return _FakeTransportCtx(streams=("r", "w", object()))
+        return _FakeTransportCtx(streams=("r", "w"))
 
     def fake_sse(**_kwargs):
         raise AssertionError("sse_client must not be called for STREAMABLEHTTP transport")
 
-    monkeypatch.setattr(usr, "streamablehttp_client", fake_stream)
+    monkeypatch.setattr(usr, "streamable_http_client", fake_stream)
     monkeypatch.setattr(usr, "sse_client", fake_sse)
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
 
@@ -1144,10 +1144,10 @@ async def test_default_session_factory_sse_path(monkeypatch):
         return _FakeTransportCtx(streams=("r", "w"))
 
     def fake_stream(**_kwargs):
-        raise AssertionError("streamablehttp_client must not be called for SSE transport")
+        raise AssertionError("streamable_http_client must not be called for SSE transport")
 
     monkeypatch.setattr(usr, "sse_client", fake_sse)
-    monkeypatch.setattr(usr, "streamablehttp_client", fake_stream)
+    monkeypatch.setattr(usr, "streamable_http_client", fake_stream)
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
 
     req = _make_request(transport_type=TransportType.SSE)
@@ -1168,9 +1168,9 @@ async def test_default_session_factory_passes_httpx_factory(monkeypatch):
 
     def fake_stream(**kwargs):
         captured.update(kwargs)
-        return _FakeTransportCtx(streams=("r", "w", object()))
+        return _FakeTransportCtx(streams=("r", "w"))
 
-    monkeypatch.setattr(usr, "streamablehttp_client", fake_stream)
+    monkeypatch.setattr(usr, "streamable_http_client", fake_stream)
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
 
     req = _make_request(httpx_client_factory=sentinel_factory)
@@ -1192,7 +1192,7 @@ async def test_default_session_factory_message_handler_factory_success(monkeypat
         factory_calls.append((url, gateway_id, downstream_session_id))
         return sentinel_handler
 
-    monkeypatch.setattr(usr, "streamablehttp_client", lambda **_kw: _FakeTransportCtx(streams=("r", "w", object())))
+    monkeypatch.setattr(usr, "streamable_http_client", lambda **_kw: _FakeTransportCtx(streams=("r", "w")))
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
 
     req = _make_request(message_handler_factory=handler_factory)
@@ -1211,7 +1211,7 @@ async def test_default_session_factory_message_handler_factory_failure_is_logged
     def bad_factory(_url, _gw, *, downstream_session_id):  # pylint: disable=unused-argument
         raise ValueError("handler factory boom")
 
-    monkeypatch.setattr(usr, "streamablehttp_client", lambda **_kw: _FakeTransportCtx(streams=("r", "w", object())))
+    monkeypatch.setattr(usr, "streamable_http_client", lambda **_kw: _FakeTransportCtx(streams=("r", "w")))
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
     _FakeClientSessionCM.last_message_handler = "leftover"
 
@@ -1233,7 +1233,7 @@ async def test_default_session_factory_transport_failure_raises_with_context(mon
     def fake_stream(**_kw):
         return _FakeTransportCtx(enter_exc=OSError("connect refused"))
 
-    monkeypatch.setattr(usr, "streamablehttp_client", fake_stream)
+    monkeypatch.setattr(usr, "streamable_http_client", fake_stream)
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
 
     req = _make_request()
@@ -1272,7 +1272,7 @@ async def test_default_session_factory_owner_task_exit_is_logged(monkeypatch, ca
         async def initialize(self):
             return None
 
-    monkeypatch.setattr(usr, "streamablehttp_client", lambda **_kw: _FakeTransportCtx(streams=("r", "w", object())))
+    monkeypatch.setattr(usr, "streamable_http_client", lambda **_kw: _FakeTransportCtx(streams=("r", "w")))
     monkeypatch.setattr(usr, "ClientSession", _BoomClientSession)
 
     req = _make_request()
@@ -1379,12 +1379,12 @@ async def test_default_session_factory_cancelled_path_runs_on_ready_timeout(monk
     class _HangingCtx:
         async def __aenter__(self):
             await asyncio.sleep(10.0)  # far longer than the factory timeout
-            return ("r", "w", object())
+            return ("r", "w")
 
         async def __aexit__(self, *_exc):
             return False
 
-    monkeypatch.setattr(usr, "streamablehttp_client", lambda **_kw: _HangingCtx())
+    monkeypatch.setattr(usr, "streamable_http_client", lambda **_kw: _HangingCtx())
     monkeypatch.setattr(usr, "ClientSession", _FakeClientSessionCM)
 
     req = _make_request(timeout_seconds=0.05)
@@ -1416,12 +1416,12 @@ async def test_probe_health_mcp_error_other_than_method_not_found_fails_fast(fac
     reg = UpstreamSessionRegistry(session_factory=factory, idle_validation_seconds=1.0)
 
     # Third-Party
-    from mcp import McpError
-    from mcp.types import ErrorData
+    from mcp import MCPError
+    from mcp_types import ErrorData
 
     class _DeniedSession:
         async def send_ping(self):
-            raise McpError(ErrorData(code=-32000, message="permission denied — token rotated"))
+            raise MCPError.from_error_data(ErrorData(code=-32000, message="permission denied — token rotated"))
 
     upstream = _make_upstream_for_probe(_DeniedSession())
     assert await reg._probe_health(upstream) is False  # pylint: disable=protected-access

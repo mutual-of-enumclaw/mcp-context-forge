@@ -22,6 +22,41 @@
 
 - Rust MCP runtime sidecar, Rust A2A runtime sidecar, and ValidationMiddleware are deprecated as of 2026-06-11 and will sunset on 2026-07-07. Use the Python MCP transport path, the Python A2A invocation path, and endpoint-level Pydantic or protocol-specific validation instead. See [Deprecations](docs/docs/deprecations.md).
 
+## [Unreleased] - MCP SDK v2 Migration
+
+### Changed
+
+#### **🔄 mcp SDK v1 → v2 Migration (`mcp==2.0.0b1`)**
+
+mcpgateway now runs against the mcp 2.0.0b1 SDK. The migration touches 10
+modules and adds two compatibility layers so the gateway boots and serves
+MCP requests under v2 without rewriting every handler body.
+
+**What changed in mcpgateway:**
+
+- `mcpgateway/utils/mcp_proxy_client.py` (new) — async context manager
+  wrapping MCP v2 `Client` class with httpx + `streamable_http_client`
+  transport for clean proxy call sites.
+- `McpError` → `MCPError` rename across all imports and usage sites.
+- `mcp.types` → `mcp_types` package rename across all imports.
+- camelCase → snake_case attributes (`.isError` → `.is_error`,
+  `.mimeType` → `.mime_type`, `.inputSchema` → `.input_schema`,
+  `.outputSchema` → `.output_schema`, `.resourceTemplates` → `.resource_templates`).
+- RootModel `.root` accessor removed throughout.
+- Proxy functions rewritten to use `mcp_proxy_client` helper with
+  auto-initializing `mcp.Client` (no manual `initialize()` calls).
+
+#### **📦 Dependency Layout — `runtime` / `live-tests` Partition (Breaking install)**
+
+The `mcp` SDK dependency is now exposed as two mutually-exclusive extras
+to let the gateway run on `mcp==2.0.0b1` while the FastMCP-based protocol
+compliance harness keeps resolving against `mcp<2.0`. uv `conflicts`
+enforces the partition at lock time. **Install commands must pick exactly
+one extra**:
+
+- **Gateway runtime / unit + integration tests** → `[runtime]`
+- **`tests/live_gateway/` protocol-compliance harness** → `[live-tests]`
+
 ## [1.0.4] - 2026-06-23 - Rust Server Migration, Security Fixes, and Build Hardening
 
 ### Overview

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Location: ./tests/live_gateway/sso/test_entra_id_integration.py
+"""Location: ./tests/integration/test_entra_id_integration.py
 Copyright 2026
 SPDX-License-Identifier: Apache-2.0
 Authors: Mihai Criveti

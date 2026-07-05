@@ -4252,9 +4252,8 @@ async def test_connect_to_streamablehttp_server_resources_and_prompts(monkeypatc
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def initialize(self):
-            capabilities = SimpleNamespace(model_dump=lambda **_kw: {"resources": True, "prompts": True})
-            return DummyResponse(capabilities=capabilities)
+        # MCP v2 Client exposes server_capabilities directly
+        server_capabilities = SimpleNamespace(model_dump=lambda **_kw: {"resources": True, "prompts": True})
 
         async def list_tools(self):
             return DummyResponse(tools=[DummyTool()])
@@ -4269,13 +4268,14 @@ async def test_connect_to_streamablehttp_server_resources_and_prompts(monkeypatc
             return DummyResponse(prompts=[DummyPrompt()])
 
     class DummyStreamable:
+        """Mock for mcp_proxy_client — yields DummySession as the MCP Client."""
         def __init__(self, **kwargs):
             factory = kwargs.get("httpx_client_factory")
             if factory:
                 factory()
 
         async def __aenter__(self):
-            return ("read", "write", lambda: "session")
+            return DummySession()  # acts as MCP Client
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
@@ -4291,8 +4291,7 @@ async def test_connect_to_streamablehttp_server_resources_and_prompts(monkeypatc
     monkeypatch.setattr("mcpgateway.services.gateway_service.get_default_verify", lambda: None)
     monkeypatch.setattr("mcpgateway.services.gateway_service.get_http_timeout", lambda: None)
     monkeypatch.setattr(service, "create_ssl_context", MagicMock(return_value="ctx"))
-    monkeypatch.setattr("mcpgateway.services.gateway_service.streamablehttp_client", lambda **kw: DummyStreamable(**kw))
-    monkeypatch.setattr("mcpgateway.services.gateway_service.ClientSession", lambda *_args: DummySession())
+    monkeypatch.setattr("mcpgateway.services.gateway_service.mcp_proxy_client", lambda **kw: DummyStreamable(**kw))
     monkeypatch.setattr("mcpgateway.services.gateway_service.ResourceCreate.model_validate", _resource_validate)
 
     capabilities, tools, resources, prompts, validation_errors = await service.connect_to_streamablehttp_server("http://server", ca_certificate=b"cert")
@@ -4316,13 +4315,12 @@ async def test_connect_to_streamablehttp_server_error_path(monkeypatch):
 
     class DummyStreamable:
         async def __aenter__(self):
-            return ("read", "write", lambda: "session")
+            return ("read", "write")
 
         async def __aexit__(self, exc_type, exc, tb):
             return True
 
-    monkeypatch.setattr("mcpgateway.services.gateway_service.streamablehttp_client", lambda **_kw: DummyStreamable())
-    monkeypatch.setattr("mcpgateway.services.gateway_service.ClientSession", lambda *_args: DummySession())
+    monkeypatch.setattr("mcpgateway.services.gateway_service.mcp_proxy_client", lambda **_kw: DummyStreamable())
 
     with pytest.raises(GatewayConnectionError):
         await service.connect_to_streamablehttp_server("http://server")
@@ -8583,7 +8581,7 @@ class TestMtlsDecryptExceptionBranches:
 
 def test_resolve_tool_title():
     # Third-Party
-    from mcp.types import Tool as MCPTool
+    from mcp_types import Tool as MCPTool
 
     # First-Party
     from mcpgateway.services.gateway_service import _resolve_tool_title

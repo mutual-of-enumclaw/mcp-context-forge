@@ -3747,25 +3747,23 @@ class TestBuildGetPromptRequest:
 
         meta_data = {"trace_id": "xyz", "user": "alice@example.com"}
         request = _build_get_prompt_request("my-prompt", None, meta_data)
-        inner_params = request.root.params
-        assert inner_params is not None
-        assert inner_params.meta is not None
-        dumped = inner_params.meta.model_dump()
-        # All meta_data keys must survive; MCP SDK may add progressToken alongside
-        assert meta_data.items() <= dumped.items()
+        # Request is GetPromptRequest directly (no ClientRequest wrapper in MCP v2)
+        assert request.params is not None
+        assert request.params.meta is not None
+        # meta is a plain dict in MCP v2 (was RequestMeta model in v1)
+        meta_dict = request.params.meta if isinstance(request.params.meta, dict) else request.params.meta.model_dump()
+        assert meta_data.items() <= meta_dict.items()
 
     def test_returns_client_request_type(self):
-        """Return value must be a ClientRequest wrapping GetPromptRequest."""
+        """Return value must be a GetPromptRequest (no ClientRequest wrapper in MCP v2)."""
         # Third-Party
-        from mcp import types
-        from mcp.types import GetPromptRequest
+        from mcp_types import GetPromptRequest
 
         # First-Party
         from mcpgateway.services.prompt_service import _build_get_prompt_request
 
         req = _build_get_prompt_request("my-prompt", {"arg": "val"}, {"k": "v"})
-        assert isinstance(req, types.ClientRequest)
-        assert isinstance(req.root, GetPromptRequest)
+        assert isinstance(req, GetPromptRequest)
 
 
 class TestGetPromptMetaDataValidationIntegration:
@@ -3867,15 +3865,7 @@ class TestFetchGatewayPromptRegistryPath:
         remote_result.messages = []
         remote_result.description = "from fallback"
 
-        class _FakeStreamsCtx:
-            async def __aenter__(self):
-                # streamablehttp_client yields (read, write, get_session_id)
-                return (MagicMock(), MagicMock(), MagicMock())
-
-            async def __aexit__(self, *_exc):
-                return False
-
-        class _FakeClientSessionCtx:
+        class _FakeMCPProxyClient:
             async def __aenter__(self):
                 session = MagicMock()
                 session.initialize = AsyncMock()
@@ -3887,8 +3877,7 @@ class TestFetchGatewayPromptRegistryPath:
         with (
             patch("mcpgateway.services.prompt_service._downstream_session_id_from_request", return_value="downstream-xyz"),
             patch("mcpgateway.services.prompt_service.get_upstream_session_registry", side_effect=RegistryNotInitializedError("not init")),
-            patch("mcpgateway.services.prompt_service.streamablehttp_client", return_value=_FakeStreamsCtx()),
-            patch("mcpgateway.services.prompt_service.ClientSession", return_value=_FakeClientSessionCtx()),
+            patch("mcpgateway.services.prompt_service.mcp_proxy_client", return_value=_FakeMCPProxyClient()),
             patch("mcpgateway.services.prompt_service._get_prompt_with_meta", new_callable=AsyncMock, return_value=remote_result),
         ):
             result = await service._fetch_gateway_prompt_result(prompt, None, meta_data=None)

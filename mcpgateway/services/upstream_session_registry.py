@@ -35,11 +35,11 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, P
 # Third-Party
 import anyio
 import httpx
-from mcp import ClientSession, McpError
+from mcp import ClientSession, MCPError
 from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcpgateway.utils.streamable_http_compat import streamable_http_client
 from mcp.shared.session import RequestResponder
-import mcp.types as mcp_types
+import mcp_types
 
 # First-Party
 from mcpgateway.transports.context import request_headers_var
@@ -326,14 +326,14 @@ async def _default_session_factory(req: SessionCreateRequest) -> tuple[ClientSes
             )
     else:
         if req.httpx_client_factory is not None:
-            transport_ctx = streamablehttp_client(
+            transport_ctx = streamable_http_client(
                 url=req.url,
                 headers=req.headers,
                 httpx_client_factory=req.httpx_client_factory,
                 timeout=req.timeout_seconds,
             )
         else:
-            transport_ctx = streamablehttp_client(
+            transport_ctx = streamable_http_client(
                 url=req.url,
                 headers=req.headers,
                 timeout=req.timeout_seconds,
@@ -712,7 +712,7 @@ class UpstreamSessionRegistry:
                     elif method == "list_resources":
                         await upstream.session.list_resources()
                 return True
-            except McpError as exc:
+            except MCPError as exc:
                 if exc.error.code == _METHOD_NOT_FOUND:
                     continue  # Server doesn't support this probe; try the next one.
                 self._metrics.health_check_failures += 1

@@ -292,9 +292,9 @@ RUN set -euo pipefail \
     && /app/.venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel uv \
     && if [ -n "$(ls -A /tmp/wheels/*.whl 2>/dev/null)" ]; then \
         echo "📦 Hermetic install from prebuilt wheel closure"; \
-        /app/.venv/bin/uv pip install --no-index --find-links=/tmp/wheels ".[redis,observability,granian,plugins,llmchat]" "psycopg[c]>=3.3.3"; \
+        /app/.venv/bin/uv pip install --no-index --find-links=/tmp/wheels ".[runtime,redis,observability,granian,plugins,llmchat]" "psycopg[c,binary]>=3.3.4"; \
     else \
-        /app/.venv/bin/uv pip install ".[redis,postgres,observability,granian,plugins,llmchat]"; \
+        /app/.venv/bin/uv pip install ".[runtime,redis,postgres,observability,granian,plugins,llmchat]"; \
     fi \
     && echo "✅ Plugins installed from PyPI via [plugins] extra" \
     && if [ "$ENABLE_RUST" = "true" ] && ls "/tmp/local-native-extension-wheels/"*.whl 1> /dev/null 2>&1; then \

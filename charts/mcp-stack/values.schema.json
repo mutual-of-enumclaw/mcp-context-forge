@@ -4669,9 +4669,9 @@
         "maxclients": {
           "type": "integer",
           "description": "Maximum number of client connections. Formula: replicas × workers × REDIS_MAX_CONNECTIONS × 1.2",
-          "default": 30000,
+          "default": 15000,
           "minimum": 5000,
-          "maximum": 100000
+          "maximum": 30000
         }
       },
       "description": "Redis cache configuration"

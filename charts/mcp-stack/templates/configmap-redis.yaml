@@ -35,5 +35,5 @@ data:
     rdbchecksum yes
 
     # Connection limits
-    maxclients {{ .Values.redis.maxclients | default 30000 }}
+    maxclients {{ .Values.redis.maxclients | default 15000 }}
 {{- end }}

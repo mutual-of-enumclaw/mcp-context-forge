@@ -752,7 +752,7 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid #e5e7eb;text-align:
 <h2><span class="sn">9</span>Local Development — HashiCorp Vault Setup</h2>
 
 <div class="box bok">
-  <strong>✅ Complete tested guide available:</strong> <a href="docs/vault-local-dev-postgresql.md"><code>docs/vault-local-dev-postgresql.md</code></a>
+  <strong>✅ Complete guide available:</strong> <a href="docs/vault-local-dev-complete-guide.md"><code>docs/vault-local-dev-complete-guide.md</code></a>
 </div>
 
 <div class="box binfo">
@@ -762,14 +762,15 @@ footer{margin-top:48px;padding-top:14px;border-top:1px solid #e5e7eb;text-align:
     <li>Vault server configuration with PostgreSQL backend</li>
     <li>Storage table creation and initialization</li>
     <li>Policy creation and token generation</li>
-    <li>Comprehensive testing and verification steps</li>
+    <li>Vault path structure and <code>server_id_hash</code> derivation from <code>gateways.url</code></li>
+    <li>Exact secret payload shape with nested <code>token</code> object (WRITE/READ via KV v2 HTTP API)</li>
     <li>PostgreSQL storage verification commands</li>
     <li>Daily workflow and troubleshooting guide</li>
   </ul>
 </div>
 
 <h3>Quick Start</h3>
-<p>Follow the complete step-by-step guide in <code>docs/vault-local-dev-postgresql.md</code>. Key highlights:</p>
+<p>Follow the complete step-by-step guide in <code>docs/vault-local-dev-complete-guide.md</code>. Key highlights:</p>
 
 <div class="steps">
   <div class="step sdb" data-n="1">
@@ -821,10 +822,11 @@ make dev
 <span class="c"># Look for startup log:
 #   INFO  oauth_token_backend=vault  vault_addr=http://127.0.0.1:8200  ✓ reachable</span>
 
-<span class="c"># Test the authorize endpoint</span>
+<span class="c"># Test the authorize endpoint — use the virtual server UUID from your MCP config URL</span>
+<span class="c"># e.g. http://localhost:4444/servers/647ad7b348044bce8fa27a2157b00a0d/mcp</span>
 curl -H "Authorization: Bearer &lt;cf-token&gt;" \
-  "http://localhost:4444/vault/authorize/&lt;server_id&gt;"
-<span class="c"># Expect: 302 redirect to IdP (or 400 if no OAuth gateway on that server)</span>
+  "http://localhost:4444/vault/authorize/647ad7b348044bce8fa27a2157b00a0d"
+<span class="c"># 302 → IdP redirect · 400 → no OAuth gateway on this virtual server · 404 → server not found</span>
 </pre>
 
 

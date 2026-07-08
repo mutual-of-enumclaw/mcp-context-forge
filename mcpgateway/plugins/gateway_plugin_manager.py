@@ -168,19 +168,8 @@ class TenantPluginManagerFactory:
     async def _build_manager(self, context_id: str) -> TenantPluginManager:
         """Create, initialise, and cache a new manager for *context_id*."""
         manager = None
-
-        new_config = await self.get_config_from_db(context_id)
-
-        if new_config is None:
-            async with self._lock:
-                default_manager = self._managers.get(DEFAULT_CONTEXT_ID)
-                if default_manager is None:
-                    logger.debug("No default manager available, using base config for context_id=%s", context_id)
-                else:
-                    self._managers[context_id] = _CachedManager(manager=default_manager.manager, created_at=time.monotonic())
-                    return default_manager.manager
-
         try:
+            new_config = await self.get_config_from_db(context_id)
             config = self._merge_tenant_config(new_config)
             config = await self._apply_redis_mode_overrides(config)
 

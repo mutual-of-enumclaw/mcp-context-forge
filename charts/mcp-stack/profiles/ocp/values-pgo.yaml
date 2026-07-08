@@ -328,6 +328,7 @@ nginxProxy:
     requests:
       cpu: "2"
       memory: 512Mi
+  config:
     workerConnections: 32768
   containerPort: 8080                      # nginx-unprivileged listens on 8080
   persistence:

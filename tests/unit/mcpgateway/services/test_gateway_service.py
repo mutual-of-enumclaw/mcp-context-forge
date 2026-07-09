@@ -41,8 +41,8 @@ from mcpgateway.services.encryption_service import get_encryption_service
 from mcpgateway.services.gateway_service import (
     GatewayConnectionError,
     GatewayDuplicateConflictError,
-    GatewayLookupConflictError,
     GatewayError,
+    GatewayLookupConflictError,
     GatewayNameConflictError,
     GatewayNotFoundError,
     GatewayService,
@@ -835,6 +835,9 @@ class TestGatewayService:
         """update_gateway persists ca_certificate, ca_certificate_sig, signing_algorithm, client_cert, and client_key."""
         mock_gateway.team_id = 1
         execute_results = [_make_execute_result(scalar=mock_gateway), _make_execute_result(scalar=None)]
+        # Extra results for the stale-tool bulk-delete statements (ToolMetric,
+        # server_tool_association, DbTool) triggered by mock_gateway's dummy tool.
+        execute_results += [_make_execute_result(rowcount=0) for _ in range(5)]
         test_db.execute = Mock(side_effect=execute_results)
         test_db.commit = Mock()
         test_db.refresh = Mock()
@@ -1516,10 +1519,15 @@ class TestGatewayService:
 
     @pytest.mark.asyncio
     async def test_update_gateway_url_initialization_failure(self, gateway_service, mock_gateway, test_db):
-        """Test updating gateway URL when initialization fails."""
+        """Test updating gateway URL when initialization fails.
+
+        A connection-affecting change (URL) combined with a re-init failure must
+        propagate GatewayConnectionError and roll back, not silently commit (#5188).
+        """
         # Use return_value for all execute calls
         test_db.execute = Mock(return_value=_make_execute_result(scalar=mock_gateway))
         test_db.commit = Mock()
+        test_db.rollback = Mock()
         test_db.refresh = Mock()
         # Mock the query for team name lookup
         test_db.query = Mock(return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=None)))))
@@ -1533,12 +1541,43 @@ class TestGatewayService:
         mock_gateway_read = MagicMock()
         mock_gateway_read.masked.return_value = mock_gateway_read
 
-        # Should not raise exception, just log warning
         with patch("mcpgateway.services.gateway_service.GatewayRead.model_validate", return_value=mock_gateway_read):
-            await gateway_service.update_gateway(test_db, 1, gateway_update)
+            with pytest.raises(GatewayConnectionError):
+                await gateway_service.update_gateway(test_db, 1, gateway_update)
 
-        assert mock_gateway.url == url
-        test_db.commit.assert_called_once()
+        test_db.commit.assert_not_called()
+        test_db.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_update_gateway_url_generic_exception_wraps_and_sanitizes(self, gateway_service, mock_gateway, test_db):
+        """Generic Exception on re-init with connection-affecting change wraps into GatewayConnectionError.
+
+        Covers sanitize_url_for_logging / sanitize_exception_message path (#5188).
+        """
+        test_db.execute = Mock(return_value=_make_execute_result(scalar=mock_gateway))
+        test_db.commit = Mock()
+        test_db.rollback = Mock()
+        test_db.refresh = Mock()
+        test_db.query = Mock(return_value=Mock(filter=Mock(return_value=Mock(first=Mock(return_value=None)))))
+
+        gateway_service._initialize_gateway = AsyncMock(
+            side_effect=Exception("Connection refused: http://example.com?api_key=secret123")  # pragma: allowlist secret
+        )
+        gateway_service._notify_gateway_updated = AsyncMock()
+        url = GatewayService.normalize_url("http://example.com/new-url")
+        gateway_update = GatewayUpdate(url=url)
+
+        mock_gateway_read = MagicMock()
+        mock_gateway_read.masked.return_value = mock_gateway_read
+
+        with patch("mcpgateway.services.gateway_service.GatewayRead.model_validate", return_value=mock_gateway_read):
+            with pytest.raises(GatewayConnectionError) as exc_info:
+                await gateway_service.update_gateway(test_db, 1, gateway_update)
+
+        # Secret query-param value must be sanitized out of the propagated message
+        assert "secret123" not in str(exc_info.value)
+        test_db.commit.assert_not_called()
+        test_db.rollback.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_update_gateway_visibility_propagates_when_init_fails(self, gateway_service, mock_gateway, test_db):
@@ -1811,7 +1850,10 @@ class TestGatewayService:
         # Mock settings for masked auth value
         with patch("mcpgateway.services.gateway_service.settings.masked_auth_value", "***MASKED***"):
             gateway_update = GatewayUpdate(
-                auth_type="bearer", auth_token="***MASKED***", auth_password="***MASKED***", auth_header_value="***MASKED***"  # pragma: allowlist secret
+                auth_type="bearer",
+                auth_token="***MASKED***",
+                auth_password="***MASKED***",  # pragma: allowlist secret
+                auth_header_value="***MASKED***",  # pragma: allowlist secret
             )  # This should not update the auth_value  # pragma: allowlist secret
 
             mock_gateway_read = MagicMock()
@@ -3252,6 +3294,7 @@ class TestGatewayRefresh:
         chain runs against a tool whose name exceeds the 128-char limit. The exact error string
         produced by the validator is asserted end-to-end.
         """
+        # First-Party
         from mcpgateway.schemas import GatewayCreate
 
         gateway_data = GatewayCreate(
@@ -6285,7 +6328,6 @@ class TestCreateSslContext:
 
 
 class TestInitializeGateway:
-
     @pytest.mark.asyncio
     async def test_oauth_auth_code_skips_connection(self, gateway_service):
         """OAuth authorization_code without flag returns empty."""
@@ -6374,6 +6416,57 @@ class TestInitializeGateway:
             await gateway_service._initialize_gateway(url="http://example.com", transport="SSE")
 
     @pytest.mark.asyncio
+    async def test_invalid_transport_raises_error(self, gateway_service, monkeypatch):
+        """Invalid transport raises GatewayConnectionError without attempting connection."""
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_url_for_logging", lambda url, params=None: url)
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_exception_message", lambda msg, params=None: msg)
+        gateway_service.connect_to_sse_server = AsyncMock()
+        gateway_service.connect_to_streamablehttp_server = AsyncMock()
+        # match= uses re.search, so substring match is sufficient here.
+        # The error is raised directly (not re-wrapped), so this matches the
+        # exact exception message from the else clause.
+        with pytest.raises(GatewayConnectionError, match="Unsupported transport 'INVALID'"):
+            await gateway_service._initialize_gateway(url="http://example.com", transport="INVALID")
+        gateway_service.connect_to_sse_server.assert_not_awaited()
+        gateway_service.connect_to_streamablehttp_server.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_transport_raises_error(self, gateway_service, monkeypatch):
+        """Empty transport string raises GatewayConnectionError."""
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_url_for_logging", lambda url, params=None: url)
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_exception_message", lambda msg, params=None: msg)
+        gateway_service.connect_to_sse_server = AsyncMock()
+        gateway_service.connect_to_streamablehttp_server = AsyncMock()
+        with pytest.raises(GatewayConnectionError, match="Unsupported transport ''"):
+            await gateway_service._initialize_gateway(url="http://example.com", transport="")
+        gateway_service.connect_to_sse_server.assert_not_awaited()
+        gateway_service.connect_to_streamablehttp_server.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_http_transport_raises_error(self, gateway_service, monkeypatch):
+        """HTTP transport (valid enum value) raises GatewayConnectionError at runtime."""
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_url_for_logging", lambda url, params=None: url)
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_exception_message", lambda msg, params=None: msg)
+        gateway_service.connect_to_sse_server = AsyncMock()
+        gateway_service.connect_to_streamablehttp_server = AsyncMock()
+        with pytest.raises(GatewayConnectionError, match="Unsupported transport 'HTTP'"):
+            await gateway_service._initialize_gateway(url="http://example.com", transport="HTTP")
+        gateway_service.connect_to_sse_server.assert_not_awaited()
+        gateway_service.connect_to_streamablehttp_server.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_stdio_transport_raises_error(self, gateway_service, monkeypatch):
+        """STDIO transport (valid enum value) raises GatewayConnectionError at runtime."""
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_url_for_logging", lambda url, params=None: url)
+        monkeypatch.setattr("mcpgateway.services.gateway_service.sanitize_exception_message", lambda msg, params=None: msg)
+        gateway_service.connect_to_sse_server = AsyncMock()
+        gateway_service.connect_to_streamablehttp_server = AsyncMock()
+        with pytest.raises(GatewayConnectionError, match="Unsupported transport 'STDIO'"):
+            await gateway_service._initialize_gateway(url="http://example.com", transport="STDIO")
+        gateway_service.connect_to_sse_server.assert_not_awaited()
+        gateway_service.connect_to_streamablehttp_server.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_none_authentication_defaults_to_empty_dict(self, gateway_service):
         gateway_service.connect_to_sse_server = AsyncMock(return_value=({}, [], [], [], []))
         await gateway_service._initialize_gateway(url="http://example.com", authentication=None, transport="SSE")
@@ -6430,7 +6523,6 @@ class TestInitializeGateway:
 
 
 class TestRefreshGatewayToolsResourcesPrompts:
-
     @pytest.mark.asyncio
     async def test_disabled_gateway_returns_empty(self, gateway_service):
         gw = SimpleNamespace(
@@ -6470,6 +6562,29 @@ class TestRefreshGatewayToolsResourcesPrompts:
         result = await gateway_service._refresh_gateway_tools_resources_prompts("gw-1", gateway=gw)
         assert result["success"] is False
         assert "connection refused" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_validation_errors_propagated(self, gateway_service):
+        """Validation errors from _initialize_gateway populate result['validation_errors'] before early return."""
+        gw = SimpleNamespace(
+            enabled=True,
+            reachable=True,
+            name="val-gw",
+            url="http://example.com",
+            transport="sse",
+            auth_type="oauth",
+            auth_value=None,
+            oauth_config={"grant_type": "authorization_code"},
+            ca_certificate=None,
+            auth_query_params=None,
+        )
+        validation_errors = [
+            "bad_tool: Tool name exceeds MCP spec limit of 128 characters (got 129)",
+        ]
+        gateway_service._initialize_gateway = AsyncMock(return_value=({}, [], [], [], validation_errors))
+        result = await gateway_service._refresh_gateway_tools_resources_prompts("gw-1", gateway=gw)
+        assert result["validation_errors"] == validation_errors
+        assert result["success"] is True
 
     @pytest.mark.asyncio
     async def test_auth_code_empty_response_returns_early(self, gateway_service):
@@ -8313,10 +8428,21 @@ async def test_update_gateway_direct_proxy_rejected_when_disabled(gateway_servic
     existing_gateway.url = "https://existing.example.com"
     existing_gateway.enabled = True
     existing_gateway.gateway_mode = "cache"
+    existing_gateway.transport = "SSE"
+    existing_gateway.auth_type = None
+    existing_gateway.auth_value = None
+    existing_gateway.auth_query_params = None
+    existing_gateway.oauth_config = None
+    existing_gateway.ca_certificate = None
+    existing_gateway.ca_certificate_sig = None
+    existing_gateway.signing_algorithm = None
+    existing_gateway.client_cert = None
+    existing_gateway.client_key = None
     existing_gateway.tools = []
     existing_gateway.resources = []
     existing_gateway.prompts = []
     existing_gateway.email_team = None
+    existing_gateway.version = 1
 
     # get_for_update returns the existing gateway (first call) and None (slug-check)
     monkeypatch.setattr(
@@ -8344,6 +8470,7 @@ async def test_update_gateway_direct_proxy_rejected_when_disabled(gateway_servic
 
     db = MagicMock()
     db.rollback = MagicMock()
+    gateway_service._initialize_gateway = AsyncMock(return_value=({}, [], [], [], []))
 
     with patch("mcpgateway.services.gateway_service.settings", mock_settings):
         with pytest.raises(GatewayError, match="disabled"):
@@ -8539,6 +8666,7 @@ class TestToolReachabilityRestoration:
         mock_db.execute.return_value = mock_result
 
         # Create a tool from the gateway (simulating successful fetch)
+        # First-Party
         from mcpgateway.schemas import ToolCreate
 
         fetched_tool = ToolCreate(
@@ -8572,6 +8700,7 @@ class TestToolReachabilityRestoration:
         mock_gateway.owner_email = None
 
         # Create a tool schema
+        # First-Party
         from mcpgateway.schemas import ToolCreate
 
         tool = ToolCreate(
@@ -8631,6 +8760,7 @@ class TestToolReachabilityRestoration:
         mock_db.execute.return_value = mock_result
 
         # Create a tool from the gateway (simulating successful fetch)
+        # First-Party
         from mcpgateway.schemas import ToolCreate
 
         fetched_tool = ToolCreate(
@@ -8692,6 +8822,7 @@ class TestToolReachabilityRestoration:
         mock_db.execute.return_value = mock_result
 
         # Create a tool from the gateway (simulating successful fetch)
+        # First-Party
         from mcpgateway.schemas import ToolCreate
 
         fetched_tool = ToolCreate(

@@ -17,20 +17,8 @@
       sizes="32x32"
       href="{{ root_path }}/static/favicon.ico"
     />
-    <!-- Tailwind CSS -->
-    {% if ui_airgapped %}
-    <script src="{{ root_path }}/static/vendor/tailwindcss/tailwind.min.js"></script>
-    {% else %}
-    <!-- SRI intentionally omitted: Tailwind Play CDN is JIT and does not provide stable CORS/SRI semantics -->
-    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-    {% endif %}
-    <script nonce="{{ csp_nonce(request) }}">
-      if (window.tailwind && typeof window.tailwind === "object") {
-        window.tailwind.config = {
-          darkMode: "class",
-        };
-      }
-    </script>
+    <!-- Tailwind CSS (pre-compiled) -->
+    <link rel="stylesheet" href="{{ root_path }}/static/css/tailwind.min.css" />
     <!-- HTMX is now bundled in the main JS bundle -->
     <script nonce="{{ csp_nonce(request) }}">
       // Configure HTMX to swap content on 4xx responses (for inline error display)
@@ -7935,7 +7923,7 @@ Hello &#123;&#123; name &#125;&#125;, welcome to &#123;&#123; company &#125;&#12
                 <tr>
                   <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div class="relative"
-                         x-data="window.Admin?.overflowMenu?.('roots-table-wrapper')"
+                         x-data="overflowMenu('roots-table-wrapper')"
                          @click.away="menuOpen = false"
                          @keydown.escape="menuOpen = false; $refs.trigger.focus()">
                       <button

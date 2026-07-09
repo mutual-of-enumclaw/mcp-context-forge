@@ -16,6 +16,12 @@ SHELL := /bin/bash
 # Read values from .env.make
 -include .env.make
 
+# Prevent included sub-makefiles from overriding the default target
+.DEFAULT_GOAL := help
+
+# Plugin integration test targets (self-contained: boots gateway + fast-time-server)
+-include tests/live_gateway/plugins/Makefile.plugin-integration
+
 # Rust build configuration (set to 1 to enable Rust builds, 0 to disable)
 # Default is disabled to avoid requiring Rust toolchain for standard builds
 ENABLE_RUST_BUILD ?= 0
@@ -257,7 +263,7 @@ export UV_BIN
 # targets (which use these pins via uvx) stay aligned.
 BLACK_VERSION           ?= 26.3.1
 ISORT_VERSION           ?= 6.1.0
-RUFF_VERSION            ?= 0.15.1
+RUFF_VERSION            ?= 0.15.20
 PYLINT_VERSION          ?= 3.3.9
 PYLINT_PYDANTIC_VERSION ?= 0.3.5
 VULTURE_VERSION         ?= 2.14
@@ -761,6 +767,14 @@ clean:
 # help: test-mcp-session-isolation - MCP session/auth isolation tests for Rust public transport
 # help: test-e2e-sso         - E2E tests requiring a live SSO identity provider (Keycloak or Entra ID)
 # help: test-live-gateway    - Run ALL live-gateway tests (mcp + sso + protocol_compliance + e2e_rust)
+# help: test-plugin-integration - Self-contained plugin E2E tests (boots gateway; PLUGIN=<name> ENFORCEMENT=static|binding|both)
+# help: test-plugin-secrets-detection  - Plugin E2E: SecretsDetection
+# help: test-plugin-encoded-exfil      - Plugin E2E: EncodedExfil
+# help: test-plugin-url-reputation     - Plugin E2E: URLReputation (static only)
+# help: test-plugin-rate-limiter       - Plugin E2E: RateLimiter (needs Redis)
+# help: test-plugin-retry-with-backoff - Plugin E2E: RetryWithBackoff (needs Redis)
+# help: test-plugin-pii-filter         - Plugin E2E: PIIFilter
+# help: test-plugin-sql-sanitizer      - Plugin E2E: SQLSanitizer (native plugin)
 # help: test                 - Run unit tests with pytest
 # help: test-verbose         - Run tests sequentially with real-time test name output
 # help: test-profile         - Run tests and show slowest 20 tests (durations >= 1s)
@@ -3844,7 +3858,7 @@ pre-commit: uv                     ## 🪄  Run pre-commit tool
 		GOPATH='$(CURDIR)/.cache/go-cache' \
 		GOMODCACHE='$(CURDIR)/.cache/go-mod' \
 		GOCACHE='$(CURDIR)/.cache/go-build' \
-		$(VENV_DIR)/bin/pre-commit run --config .pre-commit-lite.yaml --all-files --show-diff-on-failure"
+		$(VENV_DIR)/bin/pre-commit run --config .pre-commit-config.yaml --all-files --show-diff-on-failure"
 
 RUFF_MODE   ?= check
 RUFF_SELECT ?=
@@ -4764,9 +4778,8 @@ dist: clean uv               ## Build wheel + sdist into ./dist (optionally incl
 	fi
 	@echo '🛠  Python wheel & sdist written to ./dist'
 	@echo ''
-	@echo '💡 To publish both Python and Rust packages:'
+	@echo '💡 To publish the Python package:'
 	@echo '   make publish         # Publish Python package'
-	@echo '   make rust-release-publish  # Publish Rust wheels (if configured)'
 
 wheel: uv                    ## Build wheel only (Python + optionally Rust)
 	@echo "📦 Building Python wheel..."
@@ -4879,9 +4892,9 @@ endef
         print-image container-validate-env container-check-ports container-wait-healthy
 
 
-# Containerfile to use (can be overridden). Defaults to Containerfile.lite (the
+# Containerfile to use (can be overridden). Defaults to Containerfile (the
 # multi-stage production build); falls back to Dockerfile if absent.
-CONTAINER_FILE ?= $(shell [ -f "Containerfile.lite" ] && echo "Containerfile.lite" || echo "Dockerfile")
+CONTAINER_FILE ?= $(shell [ -f "Containerfile" ] && echo "Containerfile" || echo "Dockerfile")
 
 
 # Define COMMA for the conditional Z flag
@@ -7794,7 +7807,7 @@ snyk-iac-test:                      ## 🏗️ Test IaC files for security issue
 			--org=$${SNYK_ORG:-} \
 			--json-file-output=snyk-iac-compose-results.json || true; \
 	fi
-	@if [ -f "Dockerfile" ] || [ -f "Containerfile" ] || [ -f "Containerfile.lite" ]; then \
+	@if [ -f "Dockerfile" ] || [ -f "Containerfile" ]; then \
 		echo "📦 Testing Dockerfile/Containerfile..."; \
 		snyk iac test $(CONTAINER_FILE) \
 			--severity-threshold=medium \

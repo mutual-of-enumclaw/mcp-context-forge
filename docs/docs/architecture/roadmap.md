@@ -9,6 +9,7 @@
 | Release | Due Date    | Completion | Status       | Description |
 | ------- | ----------- | ---------- | ------------ | ----------- |
 | Future | Coming soon. | N/A | Planning | Future development plans |
+| 1.0.5         | 07 Jul 2026 |   100%      |    **Closed**         | API Versioning, Auth Hardening, A2A Compatibility, and Build Consolidation |
 | 1.0.4         | 22 Jun 2026 |   100 %      | **Closed**           | Rust Server Migration, Security Fixes, and Build Hardening |
 | 1.0.3         | 10 Jun 2026 |   100 %      | **Closed**           | Documentation, Technical Debt, Bugfixes |
 | 1.0.2         | 26 May 2026 |   100 %      | **Closed**           | Technical Debt and Quality |
@@ -22,7 +23,7 @@
 
 ## Future release plans and roadmap are currently being worked on
 
-## Release 1.0.0 - 1.0.4 updates can be seen in the CHANGELOG.md
+## Release 1.0.0 - 1.0.5 updates can be seen in the CHANGELOG.md
 
 ## Release 1.0.0-RC3
 
@@ -983,7 +984,7 @@
     - ✅ [**#1743**](https://github.com/IBM/mcp-context-forge/issues/1743) - Add AUDIT_TRAIL_ENABLED flag to disable audit trail logging for performance
     - ✅ [**#1933**](https://github.com/IBM/mcp-context-forge/issues/1933) - [CHORE]: Add field focus out validation to forms
     - ✅ [**#2166**](https://github.com/IBM/mcp-context-forge/issues/2166) - [CHORE]: Fix regex empty match and clean up docstring examples (S5842, S6739)
-    - ✅ [**#2190**](https://github.com/IBM/mcp-context-forge/issues/2190) - [CHORE]: Replace echo /etc/passwd with useradd in Containerfile.lite
+    - ✅ [**#2190**](https://github.com/IBM/mcp-context-forge/issues/2190) - [CHORE]: Replace echo /etc/passwd with useradd in Containerfile
     - ✅ [**#2209**](https://github.com/IBM/mcp-context-forge/issues/2209) - [CHORE] Only build non-amd64 architectures on main branch, not PRs
 
 ???+ check "📚 Documentation - Completed (1)"

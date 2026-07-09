@@ -13,8 +13,6 @@ and time-based restrictions.
 # Standard
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-import hashlib
-import hmac
 import ipaddress
 import re
 from typing import List, Optional, Pattern, Tuple
@@ -64,11 +62,6 @@ _RESOURCE_PATTERNS: List[Tuple[Pattern[str], str]] = [
     (re.compile(r"/gateways/?([a-f0-9\-]+)"), "gateway"),
 ]
 _AUTH_COOKIE_NAMES = ("jwt_token", "access_token")
-_INTERNAL_MCP_PATH_PREFIX = "/_internal/mcp"
-_INTERNAL_MCP_RUNTIME_HEADER = "x-contextforge-mcp-runtime"
-_INTERNAL_MCP_AUTH_CONTEXT_HEADER = "x-contextforge-auth-context"
-_INTERNAL_MCP_RUNTIME_AUTH_HEADER = "x-contextforge-mcp-runtime-auth"
-_INTERNAL_MCP_RUNTIME_AUTH_CONTEXT = "contextforge-internal-mcp-runtime-v1"
 
 # Permission map with precompiled patterns
 # Maps (HTTP method, path pattern) to required permission
@@ -122,6 +115,8 @@ _PERMISSION_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
     ("POST", re.compile(r"^/gateways/[^/]+/"), Permissions.GATEWAYS_UPDATE),  # POST to sub-resources (state, toggle, refresh)
     ("PUT", re.compile(r"^/gateways/[^/]+(?:$|/)"), Permissions.GATEWAYS_UPDATE),
     ("DELETE", re.compile(r"^/gateways/[^/]+(?:$|/)"), Permissions.GATEWAYS_DELETE),
+    # MCP Servers REST API (v1 prefix stripped by middleware before matching)
+    ("POST", re.compile(r"^/mcp-servers/test(?:$|/)"), Permissions.GATEWAYS_READ),
     # Metrics permissions
     ("GET", re.compile(r"^/metrics(?:$|/)"), Permissions.ADMIN_METRICS),
     ("POST", re.compile(r"^/metrics/reset(?:$|/)"), Permissions.ADMIN_METRICS),
@@ -231,6 +226,30 @@ _ADMIN_PERMISSION_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
 ]
 
 
+def _strip_v1_prefix(path: str) -> str:
+    """Strip a leading /v1 version segment from a normalized path.
+
+    Args:
+        path: Normalized path string (must start with /).
+
+    Returns:
+        Path with the /v1 prefix removed, or the original path if not present.
+
+    Examples:
+        >>> _strip_v1_prefix("/v1/tools")
+        '/tools'
+        >>> _strip_v1_prefix("/v1")
+        '/'
+        >>> _strip_v1_prefix("/tools")
+        '/tools'
+    """
+    if path.startswith("/v1/"):
+        return path[3:]
+    if path == "/v1":
+        return "/"
+    return path
+
+
 def _normalize_llm_api_prefix(prefix: Optional[str]) -> str:
     """Normalize llm_api_prefix to a canonical path prefix.
 
@@ -243,7 +262,13 @@ def _normalize_llm_api_prefix(prefix: Optional[str]) -> str:
     if not prefix:
         return ""
     normalized = "/" + str(prefix).strip().strip("/")
-    return "" if normalized == "/" else normalized
+    if normalized == "/":
+        return ""
+    # Strip the /v1 API version prefix to align with _normalize_path_for_matching.
+    normalized = _strip_v1_prefix(normalized)
+    if normalized == "/":
+        return ""
+    return normalized
 
 
 def _normalize_scope_path(scope_path: str, root_path: str) -> str:
@@ -333,16 +358,36 @@ class TokenScopingMiddleware:
     def _normalize_path_for_matching(self, request_path: str) -> str:
         """Normalize a path for team scoping and permission matching.
 
+        **IMPORTANT:** This method strips the `/v1` API version prefix to ensure
+        scope patterns work consistently across both versioned and legacy routes.
+
+        Examples:
+            - `/v1/tools` → `/tools`
+            - `/tools` → `/tools`
+            - `/v1/admin/users` → `/admin/users`
+            - `/v1` → `/`
+
+        This means:
+            - A pattern `^/tools` matches BOTH `/tools` AND `/v1/tools`
+            - A pattern `^/v1/tools` is normalized to `^/tools` and matches both
+            - **Write patterns WITHOUT the `/v1` prefix for consistency**
+
         Args:
-            request_path: Raw request path.
+            request_path: Raw request path from HTTP request.
 
         Returns:
-            Normalized absolute path suitable for route matching.
+            Normalized path with `/v1` prefix removed (if present).
+
+        See Also:
+            - docs/docs/manage/rbac.md - Token scope pattern documentation
+            - tests/unit/mcpgateway/middleware/test_token_scoping_normalization.py
         """
         normalized = _normalize_scope_path(request_path or "/", settings.app_root_path or "")
         if not normalized.startswith("/"):
-            return f"/{normalized}"
-        return normalized
+            normalized = f"/{normalized}"
+        # Strip the /v1 API version prefix so all patterns match unversioned paths.
+        # This ensures scope patterns work identically for /tools and /v1/tools.
+        return _strip_v1_prefix(normalized)
 
     def _get_normalized_request_path(self, request: Request) -> str:
         """Resolve request path with APP_ROOT_PATH-aware normalization.
@@ -1349,70 +1394,24 @@ class TokenScopingMiddleware:
             )
 
     def _is_trusted_internal_mcp_runtime_request(self, request: Request, normalized_path: str) -> bool:
-        """Return whether the request is a trusted loopback Rust MCP sidecar hop.
+        """Return whether the request is a trusted internal MCP/A2A runtime hop.
+
+        Delegates to the shared gate in ``auth_context`` so the trust decision is
+        defined in one place. Unlike the previous local check, this trusts both
+        the ``rust`` and ``affinity`` runtime markers — closing the gap where the
+        in-process session-affinity dispatch was still token-scoped.
 
         Args:
             request: Incoming HTTP request.
             normalized_path: Canonicalized request path used for route matching.
 
         Returns:
-            ``True`` when the request originated from the local Rust MCP runtime and
-            includes the expected trusted headers.
+            ``True`` when the request is a trusted internal MCP/A2A hop.
         """
-        if normalized_path != _INTERNAL_MCP_PATH_PREFIX and not normalized_path.startswith(f"{_INTERNAL_MCP_PATH_PREFIX}/"):
-            return False
+        # First-Party
+        from mcpgateway.auth_context import is_trusted_internal_mcp_request  # pylint: disable=import-outside-toplevel
 
-        if request.headers.get(_INTERNAL_MCP_RUNTIME_HEADER) != "rust":
-            return False
-
-        provided_auth = request.headers.get(_INTERNAL_MCP_RUNTIME_AUTH_HEADER)
-        if not provided_auth:
-            return False
-
-        expected_auth = self._expected_internal_mcp_runtime_auth_header()
-        if not hmac.compare_digest(provided_auth, expected_auth):
-            return False
-
-        if not request.headers.get(_INTERNAL_MCP_AUTH_CONTEXT_HEADER):
-            return False
-
-        client_host = getattr(getattr(request, "client", None), "host", None)
-        return client_host in ("127.0.0.1", "::1")
-
-    @staticmethod
-    def _auth_encryption_secret_value() -> str:
-        """Return the configured auth-encryption secret as a plain string.
-
-        Returns:
-            The auth-encryption secret, normalized to a regular string.
-        """
-        secret = settings.auth_encryption_secret
-        if hasattr(secret, "get_secret_value"):
-            return secret.get_secret_value()
-        return str(secret)
-
-    @staticmethod
-    @lru_cache(maxsize=8)
-    def _expected_internal_mcp_runtime_auth_header_for_secret(secret: str) -> str:
-        """Return the expected shared internal-auth header for a specific secret.
-
-        Args:
-            secret: Auth-encryption secret to derive the trust header from.
-
-        Returns:
-            Hex-encoded SHA-256 digest derived from the provided auth secret.
-        """
-        material = f"{secret}:{_INTERNAL_MCP_RUNTIME_AUTH_CONTEXT}".encode("utf-8")
-        return hashlib.sha256(material).hexdigest()
-
-    @staticmethod
-    def _expected_internal_mcp_runtime_auth_header() -> str:
-        """Return the expected shared internal-auth header for Rust MCP hops.
-
-        Returns:
-            Shared secret-derived digest expected on trusted internal Rust MCP calls.
-        """
-        return TokenScopingMiddleware._expected_internal_mcp_runtime_auth_header_for_secret(TokenScopingMiddleware._auth_encryption_secret_value())
+        return is_trusted_internal_mcp_request(request, path=normalized_path)
 
 
 # Create middleware instance

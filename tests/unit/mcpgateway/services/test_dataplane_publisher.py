@@ -191,7 +191,8 @@ async def test_full_payload_generation_with_mock_db():
 
     tool1 = Mock()
     tool1.id = "t1"
-    tool1.name = "public_tool"
+    tool1.name = "gw1-public_tool"
+    tool1.original_name = "public_tool"
     tool1.owner_email = "user1@example.com"
     tool1.team_id = "team1"
     tool1.visibility = "public"
@@ -199,7 +200,8 @@ async def test_full_payload_generation_with_mock_db():
 
     tool2 = Mock()
     tool2.id = "t2"
-    tool2.name = "private_tool"
+    tool2.name = "gw1-private_tool"
+    tool2.original_name = "private_tool"
     tool2.owner_email = "user1@example.com"
     tool2.team_id = "team1"
     tool2.visibility = "private"
@@ -207,7 +209,8 @@ async def test_full_payload_generation_with_mock_db():
 
     tool3 = Mock()
     tool3.id = "t3"
-    tool3.name = "team2_tool"
+    tool3.name = "gw1-team2_tool"
+    tool3.original_name = "team2_tool"
     tool3.owner_email = "user2@example.com"
     tool3.team_id = "team2"
     tool3.visibility = "team"
@@ -372,6 +375,33 @@ def test_create_payload_filters_empty_backends():
     # Server exists but has no backends (all empty)
     assert "server1" in result["user@example.com"]["virtual_hosts"]
     assert result["user@example.com"]["virtual_hosts"]["server1"]["backends"] == {}
+
+
+def test_create_payload_normalizes_null_passthrough_headers():
+    """create_payload() emits an empty list for gateways without passthrough headers."""
+    from mcpgateway.services.dataplane_publisher import DataplanePublisherService
+
+    service = DataplanePublisherService()
+    data = {
+        "user@example.com": {
+            "servers": [
+                {
+                    "id": "server1",
+                    "backend_items": {
+                        "gateway1": {"tools": ["tool1"], "resources": [], "prompts": []},
+                    },
+                }
+            ],
+            "gateways": [{"id": "gateway1", "name": "Gateway 1", "url": "http://localhost:9000", "transport": "sse", "passthrough_headers": None}],
+            "prompts": [],
+            "resources": [],
+        }
+    }
+
+    result = service.create_payload(data)
+
+    backend = result["user@example.com"]["virtual_hosts"]["server1"]["backends"]["gateway1"]
+    assert backend["passthrough_headers"] == []
 
 
 def test_create_payload_handles_missing_references():

@@ -87,20 +87,45 @@ class TokenStorageService:
 
     def _get_team_id(self, app_user_email: str) -> str:
         """
-        Extract team_id from authenticated user context.
+        Extract team_id from authenticated user context or query database.
 
-        Precedence: JWT 'teams' claim → session 'teams' → fallback 'default'.
+        Precedence: JWT 'teams' claim → session 'teams' → database query → fallback 'default'.
+
+        When user_context is empty (e.g., during OAuth callback), queries the database
+        for the user's team memberships to ensure tokens are stored under the correct
+        team_id rather than falling back to "default".
 
         Args:
-            app_user_email: User email (unused in current implementation, for future expansion)
+            app_user_email: User email (used for database lookup when context is empty)
 
         Returns:
             Team identifier string (first team if multiple, or 'default')
         """
+        # Try user_context first
         if self.user_context:
             teams = self.user_context.get("teams", [])
             if isinstance(teams, list) and teams:
                 return teams[0]  # Use first team
+
+        # Fallback: query database for user's teams
+        if app_user_email and self.db:
+            try:
+                # First-Party
+                from mcpgateway.db import EmailTeamMember  # pylint: disable=import-outside-toplevel
+                from sqlalchemy import select  # pylint: disable=import-outside-toplevel
+
+                team_members = self.db.execute(
+                    select(EmailTeamMember).where(
+                        EmailTeamMember.user_email == app_user_email,
+                        EmailTeamMember.is_active.is_(True),
+                    )
+                ).scalars().all()
+
+                if team_members:
+                    return team_members[0].team_id  # Use first team
+            except Exception as e:
+                logger.warning(f"Failed to query user teams for {app_user_email}: {e}, falling back to 'default'")
+
         return "default"
 
     async def store_tokens(

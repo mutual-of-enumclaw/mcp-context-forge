@@ -120,7 +120,7 @@ def test_get_team_id_from_teams_list(mock_db, mock_settings_database):
 
 
 def test_get_team_id_empty_teams(mock_db, mock_settings_database):
-    """Test _get_team_id returns 'default' for empty teams."""
+    """Test _get_team_id queries database when user_context has empty teams."""
     with patch("mcpgateway.services.token_storage_service.get_settings") as mock_get_settings:
         mock_get_settings.return_value = mock_settings_database
 
@@ -128,17 +128,31 @@ def test_get_team_id_empty_teams(mock_db, mock_settings_database):
             user_context = {'email': 'user@example.com', 'teams': []}
             service = TokenStorageService(mock_db, user_context=user_context)
 
+            # Mock database query to return empty list (no team memberships)
+            scalars_mock = Mock()
+            scalars_mock.all = Mock(return_value=[])
+            execute_result = Mock()
+            execute_result.scalars = Mock(return_value=scalars_mock)
+            mock_db.execute = Mock(return_value=execute_result)
+
             team_id = service._get_team_id('user@example.com')
             assert team_id == 'default'
 
 
 def test_get_team_id_no_user_context(mock_db, mock_settings_database):
-    """Test _get_team_id returns 'default' when no user_context."""
+    """Test _get_team_id queries database when no user_context."""
     with patch("mcpgateway.services.token_storage_service.get_settings") as mock_get_settings:
         mock_get_settings.return_value = mock_settings_database
 
         with patch("mcpgateway.services.token_backends.db_backend.get_encryption_service"):
             service = TokenStorageService(mock_db)
+
+            # Mock database query to return empty list (no team memberships)
+            scalars_mock = Mock()
+            scalars_mock.all = Mock(return_value=[])
+            execute_result = Mock()
+            execute_result.scalars = Mock(return_value=scalars_mock)
+            mock_db.execute = Mock(return_value=execute_result)
 
             team_id = service._get_team_id('user@example.com')
             assert team_id == 'default'
@@ -302,3 +316,69 @@ async def test_cleanup_expired_tokens_delegates_to_backend(mock_db, mock_setting
             service._backend.cleanup_expired_tokens.assert_called_once_with(max_age_days=30)
 
             assert result == 5
+
+
+def test_get_team_id_with_user_context(mock_db, mock_settings_database):
+    """Test _get_team_id uses user_context when available."""
+    with patch("mcpgateway.services.token_storage_service.get_settings") as mock_get_settings:
+        mock_get_settings.return_value = mock_settings_database
+
+        with patch("mcpgateway.services.token_backends.db_backend.get_encryption_service"):
+            user_context = {"teams": ["engineering", "platform"]}
+            service = TokenStorageService(mock_db, user_context=user_context)
+
+            team_id = service._get_team_id("user@example.com")
+
+            # Should return first team from user_context
+            assert team_id == "engineering"
+
+
+def test_get_team_id_queries_database_when_context_empty(mock_db, mock_settings_database):
+    """Test _get_team_id queries database when user_context is empty (OAuth callback scenario)."""
+    with patch("mcpgateway.services.token_storage_service.get_settings") as mock_get_settings:
+        mock_get_settings.return_value = mock_settings_database
+
+        with patch("mcpgateway.services.token_backends.db_backend.get_encryption_service"):
+            # Empty user_context (simulates OAuth callback without authentication)
+            service = TokenStorageService(mock_db, user_context={})
+
+            # Mock database query to return team memberships
+            from mcpgateway.db import EmailTeamMember
+            team_member = Mock(spec=EmailTeamMember)
+            team_member.team_id = "marketing"
+            team_member.user_email = "user@example.com"
+            team_member.is_active = True
+
+            scalars_mock = Mock()
+            scalars_mock.all = Mock(return_value=[team_member])
+            execute_result = Mock()
+            execute_result.scalars = Mock(return_value=scalars_mock)
+            mock_db.execute = Mock(return_value=execute_result)
+
+            team_id = service._get_team_id("user@example.com")
+
+            # Should query database and return team from EmailTeamMember
+            assert team_id == "marketing"
+            mock_db.execute.assert_called_once()
+
+
+def test_get_team_id_falls_back_to_default_when_no_teams(mock_db, mock_settings_database):
+    """Test _get_team_id returns 'default' when user has no team memberships."""
+    with patch("mcpgateway.services.token_storage_service.get_settings") as mock_get_settings:
+        mock_get_settings.return_value = mock_settings_database
+
+        with patch("mcpgateway.services.token_backends.db_backend.get_encryption_service"):
+            # Empty user_context
+            service = TokenStorageService(mock_db, user_context={})
+
+            # Mock database query to return empty list (no team memberships)
+            scalars_mock = Mock()
+            scalars_mock.all = Mock(return_value=[])
+            execute_result = Mock()
+            execute_result.scalars = Mock(return_value=scalars_mock)
+            mock_db.execute = Mock(return_value=execute_result)
+
+            team_id = service._get_team_id("user@example.com")
+
+            # Should fall back to "default"
+            assert team_id == "default"

@@ -4395,7 +4395,6 @@ class ToolService(BaseService):
         skip_pre_invoke: bool,
         require_app_visible: bool,
         require_model_visible: bool,
-        require_client_visible: bool,
         path_label: str,
     ) -> "ToolResult":
         """Sleep for the plugin-requested delay, then recursively re-invoke the tool.
@@ -4420,7 +4419,6 @@ class ToolService(BaseService):
             skip_pre_invoke: Whether to skip pre-invoke hooks.
             require_app_visible: Whether the retried invocation must resolve an app-visible tool.
             require_model_visible: Whether the retried invocation must resolve a model-visible tool.
-            require_client_visible: Whether the retried invocation must resolve a tool visible to either models or MCP Apps clients.
             path_label: Label for log messages (success/timeout/exception).
 
         Returns:
@@ -4451,7 +4449,6 @@ class ToolService(BaseService):
                 skip_pre_invoke=skip_pre_invoke,
                 require_app_visible=require_app_visible,
                 require_model_visible=require_model_visible,
-                require_client_visible=require_client_visible,
                 retry_attempt=retry_attempt + 1,
             )
 
@@ -4471,7 +4468,6 @@ class ToolService(BaseService):
         skip_pre_invoke: bool = False,
         require_app_visible: bool = False,
         require_model_visible: bool = False,
-        require_client_visible: bool = False,
         retry_attempt: int = 0,
     ) -> ToolResult:
         """
@@ -4497,7 +4493,6 @@ class ToolService(BaseService):
             skip_pre_invoke: When True, skip TOOL_PRE_INVOKE hooks (used by trusted Rust fallback path).
             require_app_visible: When True, deny execution unless the resolved tool is MCP Apps app-visible.
             require_model_visible: When True, deny execution unless the resolved tool is model-visible.
-            require_client_visible: When True, deny execution unless the resolved tool is visible to either models or MCP Apps clients.
             retry_attempt: Zero-based retry counter; 0 = original call.  Incremented by the retry
                 loop and compared against ``settings.max_tool_retries``.
 
@@ -4700,8 +4695,6 @@ class ToolService(BaseService):
         if require_app_visible:
             if is_direct_proxy or not is_app_visible_tool(tool_payload):
                 raise ToolNotFoundError(f"Tool not found: {name}")
-        elif require_client_visible and not is_direct_proxy and not (is_model_visible_tool(tool_payload) or is_app_visible_tool(tool_payload)):
-            raise ToolNotFoundError(f"Tool not found: {name}")
         elif require_model_visible and not is_direct_proxy and not is_model_visible_tool(tool_payload):
             raise ToolNotFoundError(f"Tool not found: {name}")
 
@@ -6084,7 +6077,6 @@ class ToolService(BaseService):
                             skip_pre_invoke=skip_pre_invoke,
                             require_app_visible=require_app_visible,
                             require_model_visible=require_model_visible,
-                            require_client_visible=require_client_visible,
                             path_label="success",
                         )
 
@@ -6116,7 +6108,6 @@ class ToolService(BaseService):
                         skip_pre_invoke=skip_pre_invoke,
                         require_app_visible=require_app_visible,
                         require_model_visible=require_model_visible,
-                        require_client_visible=require_client_visible,
                         path_label="timeout",
                     )
                 raise
@@ -6178,7 +6169,6 @@ class ToolService(BaseService):
                         skip_pre_invoke=skip_pre_invoke,
                         require_app_visible=require_app_visible,
                         require_model_visible=require_model_visible,
-                        require_client_visible=require_client_visible,
                         path_label="exception",
                     )
 

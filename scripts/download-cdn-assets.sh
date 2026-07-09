@@ -46,6 +46,22 @@ retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/code
 retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/mode/javascript/javascript.min.js" \
   -o "${STATIC_DIR}/codemirror/mode/javascript/javascript.min.js"
 
+# FACT-5595: admin.html airgapped mode also loads the simple addon + python/shell/go/rust modes.
+# The upstream manifest omitted them, so airgapped deployments 404 on these (and the 404s return
+# JSON, tripping "Refused to execute script ... MIME type"). Bake them too.
+mkdir -p "${STATIC_DIR}/codemirror/addon/mode" "${STATIC_DIR}/codemirror/mode/python" \
+  "${STATIC_DIR}/codemirror/mode/shell" "${STATIC_DIR}/codemirror/mode/go" "${STATIC_DIR}/codemirror/mode/rust"
+retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/addon/mode/simple.min.js" \
+  -o "${STATIC_DIR}/codemirror/addon/mode/simple.min.js"
+retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/mode/python/python.min.js" \
+  -o "${STATIC_DIR}/codemirror/mode/python/python.min.js"
+retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/mode/shell/shell.min.js" \
+  -o "${STATIC_DIR}/codemirror/mode/shell/shell.min.js"
+retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/mode/go/go.min.js" \
+  -o "${STATIC_DIR}/codemirror/mode/go/go.min.js"
+retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/mode/rust/rust.min.js" \
+  -o "${STATIC_DIR}/codemirror/mode/rust/rust.min.js"
+
 retry curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.20/codemirror.min.css" \
   -o "${STATIC_DIR}/codemirror/codemirror.min.css"
 

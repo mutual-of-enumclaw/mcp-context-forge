@@ -315,10 +315,13 @@ export const showTab = function (tabName) {
     ) {
       console.log("Leaving observability tab, triggering cleanup...");
       // Destroy all observability charts
-      window.chartRegistry.destroyByPrefix("metrics-");
-      window.chartRegistry.destroyByPrefix("tools-");
-      window.chartRegistry.destroyByPrefix("prompts-");
-      window.chartRegistry.destroyByPrefix("resources-");
+      // FACT-5595: registry is exposed as window.Admin.chartRegistry (app.js), not
+      // window.chartRegistry. The bare-window reference threw on every observability tab
+      // switch ("Cannot read properties of undefined (reading 'destroyByPrefix')").
+      window.Admin.chartRegistry.destroyByPrefix("metrics-");
+      window.Admin.chartRegistry.destroyByPrefix("tools-");
+      window.Admin.chartRegistry.destroyByPrefix("prompts-");
+      window.Admin.chartRegistry.destroyByPrefix("resources-");
       // Dispatch event so Alpine components can stop intervals and reset state
       document.dispatchEvent(new CustomEvent("observability:leave"));
     }

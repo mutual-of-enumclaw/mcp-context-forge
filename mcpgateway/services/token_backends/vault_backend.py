@@ -177,21 +177,41 @@ class VaultTokenBackend(AbstractTokenBackend):
                     # Return JSON response (or empty dict for DELETE)
                     return resp.json() if resp.content else {}
 
-            except httpx.ConnectTimeout as e:
+            except (httpx.ConnectTimeout, httpx.ConnectError, httpx.ReadTimeout) as e:
+                # Retry on network errors
                 if attempt < 2:
+                    logger.warning(
+                        "Vault request attempt %d failed with %s: %s",
+                        attempt + 1,
+                        type(e).__name__,
+                        SecurityValidator.sanitize_log_message(str(e)),
+                    )
                     await asyncio.sleep(2**attempt)  # 1s, 2s
                     continue
                 logger.error(
-                    "Vault unreachable after 3 attempts: %s",
+                    "Vault unreachable after 3 attempts: %s. Error: %s: %s",
                     SecurityValidator.sanitize_log_message(url),
+                    type(e).__name__,
+                    SecurityValidator.sanitize_log_message(str(e)),
                 )
                 raise VaultConnectionError("Credential storage unavailable") from e
 
             except httpx.HTTPStatusError as e:
+                # Retry on 5xx server errors
+                if e.response.status_code >= 500 and attempt < 2:
+                    logger.warning(
+                        "Vault returned %d on attempt %d: %s",
+                        e.response.status_code,
+                        attempt + 1,
+                        SecurityValidator.sanitize_log_message(str(e)),
+                    )
+                    await asyncio.sleep(2**attempt)  # 1s, 2s
+                    continue
+                # Don't retry 4xx client errors
                 if e.response.status_code == 403:
                     logger.critical("Vault auth failure - VAULT_TOKEN invalid or expired")
                     raise VaultAuthError("VAULT_TOKEN invalid or expired") from e
-                # Re-raise other HTTP errors
+                # Re-raise other HTTP errors (4xx)
                 raise
 
         # Should never reach here due to raise in loop, but make mypy happy

@@ -162,15 +162,20 @@ async def vault_authorize(
         # Initialize OAuth manager with Vault-backed token storage
         oauth_manager = OAuthManager(token_storage=TokenStorageService(db, user_context))
 
-        # Build authorization URL (same as existing /oauth/authorize flow)
+        # Build authorization URL with user email embedded in state
         root_path = resolve_root_path(request) if request else ""
         callback_url = f"{root_path}/vault/callback"
 
-        auth_url = await oauth_manager.get_authorization_url(
+        # Add callback URL to oauth_config for this flow
+        oauth_config_with_callback = gateway.oauth_config.copy()
+        oauth_config_with_callback["redirect_uri"] = callback_url
+
+        result = await oauth_manager.initiate_authorization_code_flow(
             gateway_id=gateway.id,
-            oauth_config=gateway.oauth_config,
-            callback_url=callback_url,
+            credentials=oauth_config_with_callback,
+            app_user_email=current_user.email,
         )
+        auth_url = result["authorization_url"]
 
         logger.info(
             "Vault OAuth authorize: redirecting to IdP, gateway_id=%s, gateway_url=%s, user=%s",
@@ -295,18 +300,61 @@ async def vault_callback(
             logger.warning("Vault OAuth callback: missing state parameter")
             return _invalid_state_response()
 
-        # Extract user_context from state (if available) or use empty context
-        # Note: In production, state should encode user email/teams for proper team_id extraction
-        user_context = {}  # TODO: Extract from state or session
-
-        # Initialize OAuth manager with Vault backend
-        oauth_manager = OAuthManager(token_storage=TokenStorageService(db, user_context))
+        # Initialize temporary OAuth manager to retrieve state data (including user email)
+        temp_oauth_manager = OAuthManager(token_storage=None)
 
         # Resolve gateway_id from state
-        gateway_id = await oauth_manager.resolve_gateway_id_from_state(state, allow_legacy_fallback=False)
+        gateway_id = await temp_oauth_manager.resolve_gateway_id_from_state(state, allow_legacy_fallback=False)
         if not gateway_id:
             logger.warning("Vault OAuth callback: invalid or unknown state token")
             return _invalid_state_response()
+
+        # Retrieve stored state data (contains app_user_email)
+        state_data = await temp_oauth_manager._validate_and_retrieve_state(gateway_id, state)  # pylint: disable=protected-access
+        if not state_data:
+            logger.warning("Vault OAuth callback: state validation failed")
+            return _invalid_state_response()
+
+        app_user_email = state_data.get("app_user_email")
+        if not app_user_email:
+            logger.error("Vault OAuth callback: no app_user_email in state (CWE-287)")
+            return HTMLResponse(
+                content=f"""
+                <!DOCTYPE html>
+                <html>
+                <head><title>OAuth Authorization Failed</title></head>
+                <body>
+                    <h1>❌ OAuth Authorization Failed</h1>
+                    <p>Error: User authentication context missing from OAuth state.</p>
+                    <a href="{safe_root_path}/">Return to Home</a>
+                </body>
+                </html>
+                """,
+                status_code=400,
+            )
+
+        # Build user context for Vault token storage (query teams from database)
+        user_context = {"email": app_user_email, "teams": [], "is_admin": False}
+
+        # Query user's teams from database for Vault path resolution
+        from mcpgateway.db import EmailUser, EmailTeamMember  # pylint: disable=import-outside-toplevel
+        # Get user's team memberships directly by email (EmailTeamMember FK is user_email, not user_id)
+        # Exclude deactivated memberships
+        team_members = db.execute(
+            select(EmailTeamMember).where(
+                EmailTeamMember.user_email == app_user_email,
+                EmailTeamMember.is_active.is_(True),
+            )
+        ).scalars().all()
+        user_context["teams"] = [tm.team_id for tm in team_members]
+
+        # Look up is_admin flag from EmailUser
+        user = db.execute(select(EmailUser).where(EmailUser.email == app_user_email)).scalar_one_or_none()
+        if user:
+            user_context["is_admin"] = user.is_admin
+
+        # Initialize OAuth manager with proper user context for Vault token storage
+        oauth_manager = OAuthManager(token_storage=TokenStorageService(db, user_context))
 
         # Get gateway configuration
         gateway = db.execute(select(Gateway).where(Gateway.id == gateway_id)).scalar_one_or_none()
@@ -329,7 +377,7 @@ async def vault_callback(
             gateway_id=gateway_id,
             code=code,
             state=state,
-            oauth_config=oauth_config_with_resource,
+            credentials=oauth_config_with_resource,
             ca_certificate=gateway.ca_certificate,
             client_cert=gateway.client_cert,
             client_key=gateway.client_key,

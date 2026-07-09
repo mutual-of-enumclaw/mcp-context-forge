@@ -4592,8 +4592,9 @@ async def test_fetch_tools_after_oauth_missing_user_email(gateway_service, monke
     db.execute.return_value = result
 
     class DummyTokenStorage:
-        def __init__(self, _db):
+        def __init__(self, _db, user_context=None):
             self.db = _db
+            self.user_context = user_context
 
     monkeypatch.setattr("mcpgateway.services.token_storage_service.TokenStorageService", DummyTokenStorage)
 
@@ -4615,8 +4616,9 @@ async def test_fetch_tools_after_oauth_unsupported_transport(gateway_service, mo
     db.execute.return_value = result
 
     class DummyTokenStorage:
-        def __init__(self, _db):
+        def __init__(self, _db, user_context=None):
             self.db = _db
+            self.user_context = user_context
 
         async def get_user_token(self, _gateway_id, _email):
             return "token"
@@ -4639,17 +4641,31 @@ async def test_fetch_tools_after_oauth_streamablehttp(gateway_service, monkeypat
     gateway.prompts = []
 
     db = MagicMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = gateway
-    db.execute.return_value = result
+    # Mock EmailUser and EmailTeamMember queries for user_context building
+    mock_user = MagicMock()
+    mock_user.is_admin = False
+    mock_team_member = MagicMock()
+    mock_team_member.team_id = "team-123"
+
+    # Create separate result mocks for different query types
+    gateway_result = MagicMock()
+    gateway_result.scalar_one_or_none.return_value = gateway
+    team_result = MagicMock()
+    team_result.scalars.return_value.all.return_value = [mock_team_member]
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = mock_user
+
+    # Return appropriate mock based on query order
+    db.execute.side_effect = [gateway_result, team_result, user_result]
     db.add_all = Mock()
     db.flush = Mock()
     db.commit = Mock()
     db.expire = Mock()
 
     class DummyTokenStorage:
-        def __init__(self, _db):
+        def __init__(self, _db, user_context=None):
             self.db = _db
+            self.user_context = user_context
 
         async def get_user_token(self, _gateway_id, _email):
             return "token"
@@ -4690,17 +4706,31 @@ async def test_fetch_tools_after_oauth_cleanup_and_adds_items(gateway_service, m
     gateway.last_seen = None
 
     db = MagicMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = gateway
-    db.execute.return_value = result
+    # Mock EmailUser and EmailTeamMember queries for user_context building
+    mock_user = MagicMock()
+    mock_user.is_admin = False
+    mock_team_member = MagicMock()
+    mock_team_member.team_id = "team-123"
+
+    # Create separate result mocks for different query types
+    gateway_result = MagicMock()
+    gateway_result.scalar_one_or_none.return_value = gateway
+    team_result = MagicMock()
+    team_result.scalars.return_value.all.return_value = [mock_team_member]
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = mock_user
+
+    # Return appropriate mock based on query order
+    db.execute.side_effect = [gateway_result, team_result, user_result]
     db.add_all = Mock()
     db.flush = Mock()
     db.commit = Mock()
     db.expire = Mock()
 
     class DummyTokenStorage:
-        def __init__(self, _db):
+        def __init__(self, _db, user_context=None):
             self.db = _db
+            self.user_context = user_context
 
         async def get_user_token(self, _gateway_id, _email):
             return "Z0FBQUFBQmTOKEN"

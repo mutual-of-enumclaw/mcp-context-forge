@@ -4053,10 +4053,31 @@ class ToolService(BaseService):
                     # First-Party
                     from mcpgateway.services.token_storage_service import TokenStorageService  # pylint: disable=import-outside-toplevel
 
+                    if not app_user_email:
+                        raise ToolInvocationError(f"User authentication required for OAuth-protected gateway '{gateway_name}'. Please ensure you are authenticated.")
+
                     with fresh_db_session() as token_db:
-                        token_storage = TokenStorageService(token_db, user_context={})
-                        if not app_user_email:
-                            raise ToolInvocationError(f"User authentication required for OAuth-protected gateway '{gateway_name}'. Please ensure you are authenticated.")
+                        # Build user context with team info for proper token lookup
+                        user_context = {"email": app_user_email, "teams": [], "is_admin": False}
+
+                        # Query user's teams from database for Vault path resolution
+                        from mcpgateway.db import EmailUser, EmailTeamMember  # pylint: disable=import-outside-toplevel
+                        # Get user's team memberships directly by email (EmailTeamMember FK is user_email, not user_id)
+                        # Exclude deactivated memberships
+                        team_members = token_db.execute(
+                            select(EmailTeamMember).where(
+                                EmailTeamMember.user_email == app_user_email,
+                                EmailTeamMember.is_active.is_(True),
+                            )
+                        ).scalars().all()
+                        user_context["teams"] = [tm.team_id for tm in team_members]
+
+                        # Look up is_admin flag from EmailUser
+                        user = token_db.execute(select(EmailUser).where(EmailUser.email == app_user_email)).scalar_one_or_none()
+                        if user:
+                            user_context["is_admin"] = user.is_admin
+
+                        token_storage = TokenStorageService(token_db, user_context=user_context)
                         access_token = await token_storage.get_user_token(gateway_id_str, app_user_email)
 
                     if access_token:
@@ -5240,13 +5261,32 @@ class ToolService(BaseService):
                                 # First-Party
                                 from mcpgateway.services.token_storage_service import TokenStorageService  # pylint: disable=import-outside-toplevel
 
+                                # Get user-specific OAuth token
+                                if not app_user_email:
+                                    raise ToolInvocationError(f"User authentication required for OAuth-protected gateway '{gateway_name}'. Please ensure you are authenticated.")
+
                                 with fresh_db_session() as token_db:
-                                    token_storage = TokenStorageService(token_db, user_context={})
+                                    # Build user context with team info for proper token lookup
+                                    user_context = {"email": app_user_email, "teams": [], "is_admin": False}
 
-                                    # Get user-specific OAuth token
-                                    if not app_user_email:
-                                        raise ToolInvocationError(f"User authentication required for OAuth-protected gateway '{gateway_name}'. Please ensure you are authenticated.")
+                                    # Query user's teams from database for Vault path resolution
+                                    from mcpgateway.db import EmailUser, EmailTeamMember  # pylint: disable=import-outside-toplevel
+                                    # Get user's team memberships directly by email (EmailTeamMember FK is user_email, not user_id)
+                                    # Exclude deactivated memberships
+                                    team_members = token_db.execute(
+                                        select(EmailTeamMember).where(
+                                            EmailTeamMember.user_email == app_user_email,
+                                            EmailTeamMember.is_active.is_(True),
+                                        )
+                                    ).scalars().all()
+                                    user_context["teams"] = [tm.team_id for tm in team_members]
 
+                                    # Look up is_admin flag from EmailUser
+                                    user = token_db.execute(select(EmailUser).where(EmailUser.email == app_user_email)).scalar_one_or_none()
+                                    if user:
+                                        user_context["is_admin"] = user.is_admin
+
+                                    token_storage = TokenStorageService(token_db, user_context=user_context)
                                     access_token = await token_storage.get_user_token(gateway_id_str, app_user_email)
 
                                 if access_token:

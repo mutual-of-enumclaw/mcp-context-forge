@@ -1,0 +1,94 @@
+# ===============================================================
+# MoE beta image build (FACT-5595 POC — THROWAWAY)
+# ===============================================================
+#
+# Builds a single-arch linux/amd64 image from this fork's moe-beta branch
+# (IBM main + merged PR #5244 per-user OAuth health-check fix) and pushes it
+# PUBLIC to this org's GHCR so ECS Fargate can pull it anonymously — identical
+# pull semantics to IBM's official image (no pull secret, no task-role change).
+#
+# Fargate runs amd64, so a single amd64 image is sufficient; IBM's full
+# multi-arch + wheel-closure pipeline is deliberately NOT reproduced here.
+# amd64 needs no WHEELS_REF build-arg — Containerfile resolves wheels from PyPI.
+#
+# Manual trigger only (workflow_dispatch). The pushed digest is printed to the
+# job summary — paste it into moe-ai-gateway cdk.json "containerImage".
+#
+# TEARDOWN: delete this workflow + the GHCR package once IBM ships the fix
+# in an official release. Do NOT promote this image to prd.
+# ===============================================================
+
+name: Beta Image (FACT-5595 POC)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  TAG: beta-5244
+
+jobs:
+  build:
+    name: Build & push amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Set image name lowercase
+        run: |
+          IMAGE_NAME_LC=$(echo "${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME_LC=${IMAGE_NAME_LC}" >> "${GITHUB_ENV}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          version: latest
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Containerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}:${{ env.TAG }}
+          cache-from: type=gha,scope=beta-5244-amd64
+          cache-to: type=gha,mode=max,scope=beta-5244-amd64
+          provenance: false
+
+      - name: Report digest
+        run: |
+          DIGEST="${{ steps.push.outputs.digest }}"
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}@${DIGEST}"
+          {
+            echo "## Beta image pushed"
+            echo ""
+            echo '```'
+            echo "${IMG}"
+            echo '```'
+            echo ""
+            echo "Paste the line above into moe-ai-gateway \`cdk.json\` \"containerImage\"."
+            echo ""
+            echo "> Remember to set the GHCR package visibility to **public** so ECS can pull anonymously."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Digest: ${DIGEST}"

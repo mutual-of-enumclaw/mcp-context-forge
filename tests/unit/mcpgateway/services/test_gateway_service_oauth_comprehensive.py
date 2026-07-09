@@ -866,7 +866,19 @@ class TestFetchToolsAfterOauthTokenValidation:
         from mcpgateway.services.token_validation_service import TokenValidationResult
 
         mock_oauth_auth_code_gateway.transport = "streamablehttp"
-        test_db.execute.return_value = _make_execute_result(scalar=mock_oauth_auth_code_gateway)
+
+        # Mock EmailUser and EmailTeamMember queries for user_context building
+        mock_user = MagicMock()
+        mock_user.is_admin = False
+        mock_team_member = MagicMock()
+        mock_team_member.team_id = "team-123"
+
+        # Set up side effect for multiple database calls
+        test_db.execute.side_effect = [
+            _make_execute_result(scalar=mock_oauth_auth_code_gateway),  # Gateway query
+            _make_execute_result(scalars_list=[mock_team_member]),  # EmailTeamMember query
+            _make_execute_result(scalar=mock_user),  # EmailUser query
+        ]
 
         # Create a validation result with advisory (non-blocking) warnings
         advisory_result = TokenValidationResult(is_jwt=True, token_type_valid=True)
@@ -892,7 +904,19 @@ class TestFetchToolsAfterOauthTokenValidation:
     async def test_streamablehttp_generic_error_no_diagnostics(self, gateway_service, mock_oauth_auth_code_gateway, test_db):
         """StreamableHTTP non-auth errors do not include validation diagnostics."""
         mock_oauth_auth_code_gateway.transport = "streamablehttp"
-        test_db.execute.return_value = _make_execute_result(scalar=mock_oauth_auth_code_gateway)
+
+        # Mock EmailUser and EmailTeamMember queries for user_context building
+        mock_user = MagicMock()
+        mock_user.is_admin = False
+        mock_team_member = MagicMock()
+        mock_team_member.team_id = "team-123"
+
+        # Set up side effect for multiple database calls
+        test_db.execute.side_effect = [
+            _make_execute_result(scalar=mock_oauth_auth_code_gateway),  # Gateway query
+            _make_execute_result(scalars_list=[mock_team_member]),  # EmailTeamMember query
+            _make_execute_result(scalar=mock_user),  # EmailUser query
+        ]
 
         with (
             patch("mcpgateway.services.token_storage_service.TokenStorageService") as MockTSS,

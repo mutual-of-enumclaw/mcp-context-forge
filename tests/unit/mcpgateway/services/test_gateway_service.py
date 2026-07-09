@@ -4720,12 +4720,24 @@ async def test_fetch_tools_after_oauth_cleanup_and_adds_items(gateway_service, m
     user_result = MagicMock()
     user_result.scalar_one_or_none.return_value = mock_user
 
-    # Return appropriate mock based on query order
-    db.execute.side_effect = [gateway_result, team_result, user_result]
+    # Set up side effect for specific queries, then default to Mock() for delete operations
+    execute_calls = [gateway_result, team_result, user_result]
+    call_count = [0]
+
+    def mock_execute(*args, **kwargs):
+        if call_count[0] < len(execute_calls):
+            result = execute_calls[call_count[0]]
+            call_count[0] += 1
+            return result
+        # Return a generic mock for delete operations
+        return MagicMock()
+
+    db.execute.side_effect = mock_execute
     db.add_all = Mock()
     db.flush = Mock()
     db.commit = Mock()
     db.expire = Mock()
+    db.rollback = Mock()
 
     class DummyTokenStorage:
         def __init__(self, _db, user_context=None):

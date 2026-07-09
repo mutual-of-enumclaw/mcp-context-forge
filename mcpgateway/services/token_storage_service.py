@@ -27,6 +27,10 @@ from mcpgateway.services.token_backends import (
     VaultTokenBackend,
 )
 
+# For backward compatibility with tests that patch get_encryption_service
+# Import it so it's accessible as a module attribute
+from mcpgateway.services.token_backends.db_backend import get_encryption_service  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 

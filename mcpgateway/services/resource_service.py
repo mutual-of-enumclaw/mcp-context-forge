@@ -1894,7 +1894,7 @@ class ResourceService(BaseService):
                                     access_token = None
                                     if oauth_user_email:
                                         with fresh_db_session() as token_db:
-                                            token_storage = TokenStorageService(token_db)
+                                            token_storage = TokenStorageService(token_db, user_context={})
                                             access_token = await token_storage.get_user_token(gateway_id, oauth_user_email)
 
                                     if access_token:

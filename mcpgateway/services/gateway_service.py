@@ -1922,7 +1922,7 @@ class GatewayService(BaseService):  # pylint: disable=too-many-instance-attribut
             # First-Party
             from mcpgateway.services.token_storage_service import TokenStorageService  # pylint: disable=import-outside-toplevel
 
-            token_storage = TokenStorageService(db)
+            token_storage = TokenStorageService(db, user_context={})
 
             # Get user-specific OAuth token
             if not app_user_email:
@@ -4330,7 +4330,7 @@ class GatewayService(BaseService):  # pylint: disable=too-many-instance-attribut
 
                                 # Use fresh session for OAuth token lookup
                                 with fresh_db_session() as token_db:
-                                    token_storage = TokenStorageService(token_db)
+                                    token_storage = TokenStorageService(token_db, user_context={})
 
                                     # Get user-specific OAuth token
                                     if not user_email:
@@ -6775,7 +6775,7 @@ async def test_gateway_connectivity(
                     # First-Party
                     from mcpgateway.services.token_storage_service import TokenStorageService  # pylint: disable=import-outside-toplevel
 
-                    token_storage = TokenStorageService(db)
+                    token_storage = TokenStorageService(db, user_context={})
 
                     # Get user-specific OAuth token
                     if not user_email:

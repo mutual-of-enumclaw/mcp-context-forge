@@ -219,6 +219,12 @@ postgres = [
     "psycopg[c,binary]>=3.3.4",
 ]
 
+# HashiCorp Vault client for Vault token storage backend
+# Only required when OAUTH_TOKEN_BACKEND=vault
+vault = [
+    "hvac>=2.3.0",
+]
+
 llmchat = [
     "langchain-core<=1.4.7",
     "langchain-mcp-adapters>=0.3.0",

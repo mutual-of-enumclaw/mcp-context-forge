@@ -53,6 +53,24 @@ ADMIN_CSRF_COOKIE_NAME = "mcpgateway_csrf_token"
 ADMIN_CSRF_HEADER_NAME = "x-csrf-token"
 
 
+def _build_user_context(current_user: EmailUserResponse | None) -> dict:
+    """Build user_context dict for TokenStorageService from authenticated user.
+
+    Args:
+        current_user: Authenticated user from RBAC middleware
+
+    Returns:
+        User context dict with email, teams, is_admin
+    """
+    if not current_user:
+        return {}
+    return {
+        "email": getattr(current_user, "email", ""),
+        "teams": getattr(current_user, "teams", []),
+        "is_admin": getattr(current_user, "is_admin", False),
+    }
+
+
 async def enforce_fetch_tools_csrf(request: Request) -> None:
     """Validate admin CSRF token for OAuth fetch-tools mutations.
 
@@ -496,7 +514,8 @@ async def initiate_oauth_flow(gateway_id: str, request: Request, current_user: E
 
         # Initiate OAuth flow with user context (now includes PKCE from existing implementation)
         requester_email = _extract_user_email(current_user)
-        oauth_manager = OAuthManager(token_storage=TokenStorageService(db))
+        user_context = _build_user_context(current_user)
+        oauth_manager = OAuthManager(token_storage=TokenStorageService(db, user_context))
         auth_data = await oauth_manager.initiate_authorization_code_flow(gateway_id, oauth_config, app_user_email=requester_email)
 
         logger.info(f"Initiated OAuth flow for gateway {SecurityValidator.sanitize_log_message(gateway_id)} by user {SecurityValidator.sanitize_log_message(requester_email)}")
@@ -624,7 +643,9 @@ async def oauth_callback(
             logger.warning("OAuth callback missing state parameter")
             return _invalid_state_response()
 
-        oauth_manager = OAuthManager(token_storage=TokenStorageService(db))
+        # Note: callback doesn't have current_user, but we can extract from request.state if available
+        user_context = _build_user_context(getattr(request.state, "user", None)) if request and hasattr(request, "state") else {}
+        oauth_manager = OAuthManager(token_storage=TokenStorageService(db, user_context))
         gateway_id = await oauth_manager.resolve_gateway_id_from_state(state, allow_legacy_fallback=False)
         if not gateway_id:
             logger.warning("OAuth callback received invalid or unknown state token")
